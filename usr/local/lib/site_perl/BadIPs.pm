@@ -951,10 +951,12 @@ sub _gather_from_remote_servers {
 
         eval {
             my $timeout = $self->{conf}->{remote_server_timeout} || 10;
-            my $query = q{sqlite3 /var/lib/bad_ips/bad_ips.sql "SELECT ip, originating_server, originating_service, detector_name, pattern_matched, matched_log_line, first_blocked_at, last_seen_at, expires_at, block_count FROM blocked_ips WHERE expires_at > strftime('%s', 'now')" 2>/dev/null};
+            # Escape single quotes for shell: replace ' with '\''
+            my $query = q{sqlite3 /var/lib/bad_ips/bad_ips.sql "SELECT ip, originating_server, originating_service, detector_name, pattern_matched, matched_log_line, first_blocked_at, last_seen_at, expires_at, block_count FROM blocked_ips WHERE expires_at > strftime('%s', 'now')"};
+            $query =~ s/'/'"'"'/g;  # Replace ' with '"'"'
 
-            my $cmd = qq{timeout $timeout ssh -o ConnectTimeout=$timeout -o BatchMode=yes $server '$query'};
-            my @lines = `$cmd 2>&1`;
+            my $cmd = qq{timeout $timeout ssh -o ConnectTimeout=$timeout -o BatchMode=yes $server '$query' 2>&1};
+            my @lines = `$cmd`;
             my $exit_code = $? >> 8;
 
             if ($exit_code != 0) {
