@@ -1,0 +1,116 @@
+.PHONY: all clean deb install help
+
+PACKAGE_NAME = bad-ips
+VERSION = $(shell cat VERSION)
+DEB_NAME = $(PACKAGE_NAME)_$(VERSION)_all.deb
+BUILD_DIR = $(CURDIR)/build
+INSTALL_ROOT = $(BUILD_DIR)/$(PACKAGE_NAME)
+
+help:
+	@echo "Bad IPs Package Builder"
+	@echo ""
+	@echo "Targets:"
+	@echo "  make deb     - Build .deb package"
+	@echo "  make clean   - Remove build artifacts"
+	@echo "  make install - Install to local system (sudo required)"
+	@echo "  make help    - Show this help message"
+	@echo ""
+
+all: deb
+
+clean:
+	rm -rf $(BUILD_DIR)
+	rm -f $(DEB_NAME)
+	@echo "Cleaned build artifacts"
+
+deb: clean
+	@echo "Building $(DEB_NAME)..."
+
+	# Create build directory structure
+	mkdir -p $(INSTALL_ROOT)/DEBIAN
+	mkdir -p $(INSTALL_ROOT)/usr/local/sbin
+	mkdir -p $(INSTALL_ROOT)/usr/local/lib/site_perl
+	mkdir -p $(INSTALL_ROOT)/usr/local/etc/badips.d
+	mkdir -p $(INSTALL_ROOT)/etc/systemd/system
+	mkdir -p $(INSTALL_ROOT)/usr/share/doc/$(PACKAGE_NAME)
+
+	# Copy DEBIAN control files
+	cp DEBIAN/control $(INSTALL_ROOT)/DEBIAN/
+	cp DEBIAN/postinst $(INSTALL_ROOT)/DEBIAN/
+	cp DEBIAN/prerm $(INSTALL_ROOT)/DEBIAN/
+	cp DEBIAN/postrm $(INSTALL_ROOT)/DEBIAN/
+	cp DEBIAN/conffiles $(INSTALL_ROOT)/DEBIAN/
+	chmod +x $(INSTALL_ROOT)/DEBIAN/postinst
+	chmod +x $(INSTALL_ROOT)/DEBIAN/prerm
+	chmod +x $(INSTALL_ROOT)/DEBIAN/postrm
+
+	# Copy binaries
+	cp usr/local/sbin/bad_ips $(INSTALL_ROOT)/usr/local/sbin/
+	chmod +x $(INSTALL_ROOT)/usr/local/sbin/bad_ips
+
+	# Copy Perl module
+	cp usr/local/lib/site_perl/BadIPs.pm $(INSTALL_ROOT)/usr/local/lib/site_perl/
+
+	# Copy configuration files
+	cp usr/local/etc/badips.conf.hunter-template $(INSTALL_ROOT)/usr/local/etc/
+	cp usr/local/etc/badips.conf.gatherer-template $(INSTALL_ROOT)/usr/local/etc/
+	cp usr/local/etc/badips.d/*.conf $(INSTALL_ROOT)/usr/local/etc/badips.d/
+
+	# Copy systemd service
+	cp etc/systemd/system/bad_ips.service $(INSTALL_ROOT)/etc/systemd/system/
+
+	# Copy documentation
+	cp README.md $(INSTALL_ROOT)/usr/share/doc/$(PACKAGE_NAME)/
+	cp docs/CONFIGURATION.md $(INSTALL_ROOT)/usr/share/doc/$(PACKAGE_NAME)/
+	cp VERSION $(INSTALL_ROOT)/usr/share/doc/$(PACKAGE_NAME)/
+
+	# Set permissions
+	find $(INSTALL_ROOT) -type f -exec chmod 644 {} \;
+	find $(INSTALL_ROOT) -type d -exec chmod 755 {} \;
+	chmod +x $(INSTALL_ROOT)/usr/local/sbin/bad_ips
+	chmod +x $(INSTALL_ROOT)/DEBIAN/postinst
+	chmod +x $(INSTALL_ROOT)/DEBIAN/prerm
+	chmod +x $(INSTALL_ROOT)/DEBIAN/postrm
+
+	# Build .deb
+	dpkg-deb --build $(INSTALL_ROOT) $(DEB_NAME)
+
+	@echo ""
+	@echo "==================================================================="
+	@echo "SUCCESS: Built $(DEB_NAME)"
+	@echo "==================================================================="
+	@echo ""
+	@echo "To install:"
+	@echo "  sudo dpkg -i $(DEB_NAME)"
+	@echo "  sudo apt-get install -f  # Install dependencies"
+	@echo ""
+	@echo "To test:"
+	@echo "  dpkg-deb -I $(DEB_NAME)  # Show package info"
+	@echo "  dpkg-deb -c $(DEB_NAME)  # List contents"
+	@echo ""
+
+install:
+	@if [ "$$(id -u)" != "0" ]; then \
+		echo "Error: Must run as root (use sudo)"; \
+		exit 1; \
+	fi
+
+	@if [ ! -f "$(DEB_NAME)" ]; then \
+		echo "Error: $(DEB_NAME) not found. Run 'make deb' first."; \
+		exit 1; \
+	fi
+
+	dpkg -i $(DEB_NAME)
+	apt-get install -f -y
+
+	@echo ""
+	@echo "==================================================================="
+	@echo "Installed $(PACKAGE_NAME) v$(VERSION)"
+	@echo "==================================================================="
+	@echo ""
+	@echo "Next steps:"
+	@echo "  1. Configure: sudo cp /usr/local/etc/badips.conf.hunter-template /usr/local/etc/badips.conf"
+	@echo "  2. Edit: sudo nano /usr/local/etc/badips.conf"
+	@echo "  3. Enable: sudo systemctl enable bad_ips.service"
+	@echo "  4. Start: sudo systemctl start bad_ips.service"
+	@echo ""

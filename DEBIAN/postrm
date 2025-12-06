@@ -1,0 +1,34 @@
+#!/bin/bash
+set -e
+
+case "$1" in
+    purge)
+        # Remove database directory on purge
+        if [ -d /var/lib/bad_ips ]; then
+            echo "Removing database directory /var/lib/bad_ips"
+            rm -rf /var/lib/bad_ips
+        fi
+
+        # Note: We do NOT remove the nftables set automatically
+        # The user may want to keep blocks in place even after uninstall
+        echo ""
+        echo "NOTE: nftables set 'badipv4' was NOT removed."
+        echo "To manually remove it:"
+        echo "  sudo nft delete set inet filter badipv4"
+        echo ""
+        ;;
+
+    remove|upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
+        # Do nothing on remove/upgrade - keep database intact
+        ;;
+
+    *)
+        echo "postrm called with unknown argument \`$1'" >&2
+        exit 1
+        ;;
+esac
+
+# Reload systemd daemon
+systemctl daemon-reload || true
+
+exit 0

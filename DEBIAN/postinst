@@ -1,0 +1,66 @@
+#!/bin/bash
+set -e
+
+# Create database directory
+if [ ! -d /var/lib/bad_ips ]; then
+    mkdir -p /var/lib/bad_ips
+    chmod 755 /var/lib/bad_ips
+fi
+
+# Create nftables set if it doesn't exist
+if ! nft list set inet filter badipv4 >/dev/null 2>&1; then
+    # Check if inet filter table exists
+    if ! nft list table inet filter >/dev/null 2>&1; then
+        echo "WARNING: nftables table 'inet filter' does not exist."
+        echo "Please create it manually with:"
+        echo "  sudo nft add table inet filter"
+        echo "  sudo nft add chain inet filter input { type filter hook input priority 0 \\; }"
+    fi
+
+    # Try to create the set
+    if nft list table inet filter >/dev/null 2>&1; then
+        nft add set inet filter badipv4 { type ipv4_addr \\; flags timeout \\; } || true
+        echo "Created nftables set 'badipv4' in inet filter table"
+
+        # Add drop rule if not already present
+        if ! nft list chain inet filter input 2>/dev/null | grep -q "badipv4 drop"; then
+            nft add rule inet filter input ip saddr @badipv4 drop || true
+            echo "Added drop rule for badipv4 set"
+        fi
+    fi
+fi
+
+# Reload systemd daemon
+systemctl daemon-reload
+
+# Check if config file exists
+if [ ! -f /usr/local/etc/badips.conf ]; then
+    echo ""
+    echo "==================================================================="
+    echo "IMPORTANT: Configuration Required"
+    echo "==================================================================="
+    echo ""
+    echo "Bad IPs has been installed but requires configuration."
+    echo ""
+    echo "Please copy the appropriate template to /usr/local/etc/badips.conf:"
+    echo ""
+    echo "For hunter mode (most servers):"
+    echo "  sudo cp /usr/local/etc/badips.conf.hunter-template /usr/local/etc/badips.conf"
+    echo ""
+    echo "For gatherer mode (administrator server):"
+    echo "  sudo cp /usr/local/etc/badips.conf.gatherer-template /usr/local/etc/badips.conf"
+    echo ""
+    echo "CRITICAL: Edit the config and set 'never_block_cidrs' with your trusted networks!"
+    echo ""
+    echo "After configuration:"
+    echo "  sudo systemctl enable bad_ips.service"
+    echo "  sudo systemctl start bad_ips.service"
+    echo ""
+    echo "==================================================================="
+    echo ""
+else
+    echo "Configuration file already exists at /usr/local/etc/badips.conf"
+    echo "To upgrade: review changes in the template files if needed"
+fi
+
+exit 0
