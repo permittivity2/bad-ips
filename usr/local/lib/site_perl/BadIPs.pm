@@ -386,6 +386,57 @@ sub _init_db {
         )
     });
 
+    # Phase 9: New tables for block tracking and propagation visibility
+    $dbh->do(q{
+        CREATE TABLE IF NOT EXISTS blocked_ips (
+            ip TEXT NOT NULL,
+            originating_server TEXT NOT NULL,
+            originating_service TEXT NOT NULL,
+            detector_name TEXT NOT NULL,
+            pattern_matched TEXT,
+            matched_log_line TEXT,
+            first_blocked_at INTEGER NOT NULL,
+            last_seen_at INTEGER NOT NULL,
+            expires_at INTEGER NOT NULL,
+            block_count INTEGER DEFAULT 1,
+            PRIMARY KEY (ip, originating_server)
+        )
+    });
+
+    $dbh->do(q{
+        CREATE TABLE IF NOT EXISTS propagation_status (
+            ip TEXT NOT NULL,
+            target_server TEXT NOT NULL,
+            status TEXT NOT NULL,
+            propagated_at INTEGER,
+            last_attempt INTEGER,
+            attempt_count INTEGER DEFAULT 0,
+            error_message TEXT,
+            PRIMARY KEY (ip, target_server),
+            FOREIGN KEY (ip) REFERENCES blocked_ips(ip) ON DELETE CASCADE
+        )
+    });
+
+    $dbh->do(q{
+        CREATE TABLE IF NOT EXISTS schema_version (
+            version INTEGER PRIMARY KEY,
+            upgraded_at INTEGER NOT NULL
+        )
+    });
+
+    # Create indexes for new tables
+    $dbh->do(q{CREATE INDEX IF NOT EXISTS idx_blocked_ips_expires ON blocked_ips(expires_at)});
+    $dbh->do(q{CREATE INDEX IF NOT EXISTS idx_blocked_ips_service ON blocked_ips(originating_service)});
+    $dbh->do(q{CREATE INDEX IF NOT EXISTS idx_blocked_ips_server ON blocked_ips(originating_server)});
+    $dbh->do(q{CREATE INDEX IF NOT EXISTS idx_propagation_status ON propagation_status(status)});
+    $dbh->do(q{CREATE INDEX IF NOT EXISTS idx_propagation_pending ON propagation_status(status, last_attempt)});
+
+    # Set schema version to 2 if not already set
+    my ($current_version) = $dbh->selectrow_array("SELECT version FROM schema_version LIMIT 1");
+    unless ($current_version) {
+        $dbh->do("INSERT INTO schema_version (version, upgraded_at) VALUES (2, ?)", undef, time());
+    }
+
     $self->{dbh} = $dbh;
 
     # cache the UPSERT statement
@@ -407,8 +458,65 @@ sub _db_upsert_jailed_ip {
     $self->{sth_upsert}->execute($ip, $now, $now, int($expires_epoch));
 }
 
+sub _db_upsert_blocked_ip {
+    my ($self, $ip, $expires_epoch, $metadata) = @_;
+    my $now = int(time());
+    my $hostname = $self->{conf}->{hostname} || `hostname -s`;
+    chomp $hostname;
+
+    # Extract metadata with defaults
+    my $service = $metadata->{service} || 'unknown';
+    my $detector = $metadata->{detector} || 'unknown';
+    my $pattern = $metadata->{pattern} || 'unknown';
+    my $log_line = $metadata->{log_line} || '';
+
+    # Truncate log line to 500 chars
+    $log_line = substr($log_line, 0, 500) if length($log_line) > 500;
+
+    # UPSERT into blocked_ips table
+    my $sql = q{
+        INSERT INTO blocked_ips (
+            ip, originating_server, originating_service, detector_name,
+            pattern_matched, matched_log_line,
+            first_blocked_at, last_seen_at, expires_at, block_count
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+        ON CONFLICT(ip, originating_server) DO UPDATE SET
+            last_seen_at = excluded.last_seen_at,
+            expires_at = excluded.expires_at,
+            block_count = blocked_ips.block_count + 1,
+            pattern_matched = excluded.pattern_matched,
+            matched_log_line = excluded.matched_log_line
+    };
+
+    eval {
+        $self->{dbh}->do($sql, undef,
+            $ip, $hostname, $service, $detector,
+            $pattern, $log_line,
+            $now, $now, int($expires_epoch)
+        );
+    };
+    if ($@) {
+        $self->_log(error => "Failed to insert into blocked_ips for $ip: $@");
+    }
+}
+
 # -------------------- main loop --------------------
 sub run {
+    my ($self) = @_;
+
+    # Check mode and dispatch
+    my $mode = $self->{conf}->{mode} || 'hunter';
+
+    if ($mode eq 'gatherer') {
+        $self->_log(info => "Starting in gatherer mode");
+        return $self->run_gatherer();
+    } else {
+        $self->_log(info => "Starting in hunter mode");
+        return $self->run_hunter();
+    }
+}
+
+sub run_hunter {
     my ($self) = @_;
     my $hb_at = time() + $self->{conf}->{heartbeat};
 
@@ -431,14 +539,15 @@ sub run {
         $self->{run_count}++;
 
         my $bad = $self->_bad_entries($entries);
-        my $ips = $self->_remote_addresses($bad);
-        $ips    = $self->_remove_never_block_ips($ips);
-        $ips    = $self->_remove_already_blocked_ips($ips);
+        my $ip_data = $self->_remote_addresses($bad);
+        $ip_data    = $self->_remove_never_block_ips($ip_data);
+        $ip_data    = $self->_remove_already_blocked_ips($ip_data);
 
-        map { $new_since_hb{$_} = 1 } @$ips if @$ips;
+        # Track IPs for heartbeat reporting
+        map { $new_since_hb{$_->{ip}} = 1 } @$ip_data if @$ip_data;
 
-        $self->_add_ips_to_nft($ips);
-        $self->_log(debug => "Run #$self->{run_count}: blocked " . scalar(@$ips) . " new IPs");
+        $self->_add_ips_to_nft($ip_data);
+        $self->_log(debug => "Run #$self->{run_count}: blocked " . scalar(@$ip_data) . " new IPs");
 
         sleep $self->{conf}->{sleep_time};
         $self->_remove_expired_ips();
@@ -573,10 +682,20 @@ sub _bad_entries {
         my $u = $entries->{$unit};
         ENTRY: for my $pid (keys %$u) {
             my $msg = $u->{$pid};
+            my $pattern_num = 0;
             for my $re (@$patterns) {
+                $pattern_num++;
                 if ($msg =~ $re) {
-                    $bad{$pid} = $msg;
-                    $self->_log(debug => "Unit $unit matched");
+                    # Store message with metadata
+                    $bad{$pid} = {
+                        msg => $msg,
+                        unit => $unit,
+                        pattern_num => $pattern_num,
+                        pattern => $self->{conf}->{bad_conn_patterns}->[$pattern_num-1] || 'unknown',
+                        detector => $self->_detector_name_from_unit($unit),
+                        service => $self->_service_name_from_unit($unit)
+                    };
+                    $self->_log(debug => "Unit $unit matched pattern#$pattern_num");
                     last ENTRY;
                 }
             }
@@ -585,52 +704,118 @@ sub _bad_entries {
     return \%bad;
 }
 
-sub _remote_addresses {
-    my ($self, $entries) = @_;
-    my @ips;
-    for my $k (keys %$entries) {
-        my $msg = $entries->{$k};
-        while ($msg =~ /$RE{net}{IPv4}/g) {
-            push @ips, $&;
-        }
-    }
-    my @u = sort { $a cmp $b } keys %{{ map { $_ => 1 } @ips }};
-    $self->_log(debug => "Returning: " . join(", ", @u)) if @u;
-    return \@u;
+sub _detector_name_from_unit {
+    my ($self, $unit) = @_;
+    # Extract detector name from unit name
+    # e.g., "sshd.service" -> "sshd", "nginx.service" -> "nginx"
+    return 'file' if $unit =~ /^file:/;
+    my ($name) = $unit =~ /^([^\.]+)/;
+    return $name || 'unknown';
 }
 
-sub _remove_never_block_ips {
-    my ($self, $ips) = @_;
-    my %keep = map { $_ => 1 } @$ips;
-    for my $ip (@$ips) {
-        for my $cidr (@{$self->{conf}->{never_block_cidrs}}) {
-            if (cidrlookup($ip, $cidr)) {
-                $self->_log(info => "IP $ip is in $cidr; skipping");
-                delete $keep{$ip};
-                last;
+sub _service_name_from_unit {
+    my ($self, $unit) = @_;
+    # Map unit names to service names
+    return 'file' if $unit =~ /^file:/;
+    my ($name) = $unit =~ /^([^\.]+)/;
+    return $name || 'unknown';
+}
+
+sub _remote_addresses {
+    my ($self, $entries) = @_;
+    my %ip_metadata = (); # ip => metadata
+
+    for my $k (keys %$entries) {
+        my $entry = $entries->{$k};
+        my $msg = ref($entry) eq 'HASH' ? $entry->{msg} : $entry;
+
+        # Extract all IPs from this message
+        my @found_ips;
+        while ($msg =~ /$RE{net}{IPv4}/g) {
+            push @found_ips, $&;
+        }
+
+        # Store first IP found with its metadata
+        if (@found_ips && ref($entry) eq 'HASH') {
+            for my $ip (@found_ips) {
+                unless (exists $ip_metadata{$ip}) {
+                    $ip_metadata{$ip} = {
+                        service => $entry->{service},
+                        detector => $entry->{detector},
+                        pattern => "pattern$entry->{pattern_num}: $entry->{pattern}",
+                        log_line => $entry->{msg}
+                    };
+                }
+            }
+        } elsif (@found_ips) {
+            # Fallback for old format (no metadata)
+            for my $ip (@found_ips) {
+                $ip_metadata{$ip} ||= {};
             }
         }
     }
-    return [ keys %keep ];
+
+    my @ips = sort { $a cmp $b } keys %ip_metadata;
+    $self->_log(debug => "Returning: " . join(", ", @ips)) if @ips;
+
+    # Return array ref of hashrefs: [ { ip => '1.2.3.4', metadata => {...} }, ... ]
+    return [ map { { ip => $_, metadata => $ip_metadata{$_} } } @ips ];
+}
+
+sub _remove_never_block_ips {
+    my ($self, $ip_data) = @_;
+    my @kept;
+
+    for my $item (@$ip_data) {
+        my $ip = $item->{ip};
+        my $should_block = 1;
+
+        for my $cidr (@{$self->{conf}->{never_block_cidrs}}) {
+            if (cidrlookup($ip, $cidr)) {
+                $self->_log(info => "IP $ip is in $cidr; skipping");
+                $should_block = 0;
+                last;
+            }
+        }
+
+        push @kept, $item if $should_block;
+    }
+
+    return \@kept;
 }
 
 sub _remove_already_blocked_ips {
-    my ($self, $ips) = @_;
-    my @already = grep { $self->{blocked}{$_} } @$ips;
+    my ($self, $ip_data) = @_;
+    my @new_blocks;
+    my @already;
+
+    for my $item (@$ip_data) {
+        my $ip = $item->{ip};
+        if ($self->{blocked}{$ip}) {
+            push @already, $ip;
+        } else {
+            push @new_blocks, $item;
+        }
+    }
+
     $self->_log(debug => "Already blocked: " . join(',', @already)) if @already;
-    return [ grep { !$self->{blocked}{$_} } @$ips ];
+    return \@new_blocks;
 }
 
 # -------------------- nftables --------------------
 sub _add_ips_to_nft {
-    my ($self, $ips) = @_;
+    my ($self, $ip_data) = @_;
     my $set   = $self->{conf}->{nft_set};
     my $tab   = $self->{conf}->{nft_family_table};
     my $fam   = $self->{conf}->{nft_table};
     my $ttl   = $self->{conf}->{blocking_time};
 
-    @$ips = sort @$ips;
-    for my $ip (@$ips) {
+    # Sort by IP address
+    my @sorted = sort { $a->{ip} cmp $b->{ip} } @$ip_data;
+
+    for my $item (@sorted) {
+        my $ip = $item->{ip};
+        my $metadata = $item->{metadata} || {};
         my $cmd = "nft add element $fam $tab $set { $ip timeout ${ttl}s }";
 
         if ($self->{dry_run}) {
@@ -643,9 +828,17 @@ sub _add_ips_to_nft {
         if (system($cmd) == 0) {
             my $exp = time() + $ttl;
             $self->{blocked}{$ip} = $exp;
+
+            # Insert into both old and new tables (dual-write)
             eval { $self->_db_upsert_jailed_ip($ip, $exp) };
-            $@ and $self->_log(error => "SQLite upsert failed for $ip: $@");
-            $self->_log(info  => "Jailed $ip for ${ttl}s");
+            $@ and $self->_log(error => "SQLite upsert (jailed_ips) failed for $ip: $@");
+
+            eval { $self->_db_upsert_blocked_ip($ip, $exp, $metadata) };
+            $@ and $self->_log(error => "SQLite upsert (blocked_ips) failed for $ip: $@");
+
+            my $svc = $metadata->{service} || 'unknown';
+            my $det = $metadata->{detector} || 'unknown';
+            $self->_log(info  => "Jailed $ip for ${ttl}s (service: $svc, detector: $det)");
         } else {
             my $err = $!;
             $self->_log(error => "nft add failed for $ip: $err");
@@ -703,6 +896,234 @@ sub _reload_config_signal {
     };
     if ($@) {
         $self->_log(error => "Failed to reload config on SIGHUP: $@");
+    }
+}
+
+# -------------------- gatherer mode --------------------
+sub run_gatherer {
+    my ($self) = @_;
+    my $delay = $self->{conf}->{propagation_delay} || 5;
+    my @remote_servers = split(/\s*,\s*/, $self->{conf}->{remote_servers} || '');
+
+    unless (@remote_servers) {
+        $self->_log(error => "Gatherer mode requires remote_servers configured");
+        die "No remote_servers configured for gatherer mode\n";
+    }
+
+    $self->_log(info => "Starting gatherer mode, polling " . scalar(@remote_servers) . " servers every ${delay}s");
+    $self->_log(info => "Remote servers: " . join(", ", @remote_servers));
+
+    $SIG{QUIT} = sub { $self->_log(info => "SIGQUIT"); exit 0; };
+    $SIG{INT}  = sub { $self->_log(info => "SIGINT");  exit 0; };
+    $SIG{TERM} = sub { $self->_log(info => "SIGTERM"); exit 0; };
+    $SIG{HUP}  = sub { $self->_reload_config_signal(); };
+
+    while (1) {
+        eval {
+            # Step 1: Gather blocks from all hunters
+            $self->_log(debug => "Gathering blocks from remote servers...");
+            my $collected = $self->_gather_from_remote_servers(\@remote_servers);
+
+            # Step 2: Merge into local database
+            $self->_log(debug => "Merging " . scalar(keys %$collected) . " unique IPs into database");
+            $self->_merge_collected_blocks($collected);
+
+            # Step 3: Propagate to all servers
+            $self->_log(debug => "Propagating blocks to all servers...");
+            $self->_propagate_blocks(\@remote_servers);
+
+            $self->_log(info => "Gatherer cycle complete");
+        };
+        if ($@) {
+            $self->_log(error => "Gatherer cycle failed: $@");
+        }
+
+        sleep $delay;
+    }
+}
+
+sub _gather_from_remote_servers {
+    my ($self, $servers) = @_;
+    my %collected; # ip => { server => {...metadata...} }
+
+    for my $server (@$servers) {
+        $self->_log(debug => "Querying $server...");
+
+        eval {
+            my $timeout = $self->{conf}->{remote_server_timeout} || 10;
+            my $query = q{sqlite3 /var/lib/bad_ips/bad_ips.sql "SELECT ip, originating_server, originating_service, detector_name, pattern_matched, matched_log_line, first_blocked_at, last_seen_at, expires_at, block_count FROM blocked_ips WHERE expires_at > strftime('%s', 'now')" 2>/dev/null};
+
+            my $cmd = qq{timeout $timeout ssh -o ConnectTimeout=$timeout -o BatchMode=yes $server '$query'};
+            my @lines = `$cmd 2>&1`;
+            my $exit_code = $? >> 8;
+
+            if ($exit_code != 0) {
+                $self->_log(warn => "Failed to query $server (exit code: $exit_code)");
+                return;
+            }
+
+            # Parse SQLite output (pipe-delimited)
+            for my $line (@lines) {
+                chomp $line;
+                my ($ip, $orig_server, $orig_service, $detector, $pattern, $log_line,
+                    $first_blocked, $last_seen, $expires, $count) = split(/\|/, $line, 10);
+
+                next unless $ip && $orig_server;
+
+                $collected{$ip}{$orig_server} = {
+                    originating_service => $orig_service,
+                    detector_name => $detector,
+                    pattern_matched => $pattern,
+                    matched_log_line => $log_line,
+                    first_blocked_at => $first_blocked,
+                    last_seen_at => $last_seen,
+                    expires_at => $expires,
+                    block_count => $count
+                };
+            }
+
+            $self->_log(debug => "Collected " . scalar(@lines) . " blocks from $server");
+        };
+        if ($@) {
+            $self->_log(error => "Error querying $server: $@");
+        }
+    }
+
+    return \%collected;
+}
+
+sub _merge_collected_blocks {
+    my ($self, $collected) = @_;
+
+    for my $ip (keys %$collected) {
+        for my $server (keys %{$collected->{$ip}}) {
+            my $data = $collected->{$ip}{$server};
+
+            # UPSERT into blocked_ips
+            my $sql = q{
+                INSERT INTO blocked_ips (
+                    ip, originating_server, originating_service, detector_name,
+                    pattern_matched, matched_log_line,
+                    first_blocked_at, last_seen_at, expires_at, block_count
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(ip, originating_server) DO UPDATE SET
+                    last_seen_at = excluded.last_seen_at,
+                    expires_at = excluded.expires_at,
+                    block_count = excluded.block_count,
+                    pattern_matched = excluded.pattern_matched,
+                    matched_log_line = excluded.matched_log_line
+            };
+
+            eval {
+                $self->{dbh}->do($sql, undef,
+                    $ip, $server,
+                    $data->{originating_service},
+                    $data->{detector_name},
+                    $data->{pattern_matched},
+                    $data->{matched_log_line},
+                    $data->{first_blocked_at},
+                    $data->{last_seen_at},
+                    $data->{expires_at},
+                    $data->{block_count}
+                );
+            };
+            if ($@) {
+                $self->_log(error => "Failed to merge $ip from $server: $@");
+            }
+        }
+    }
+}
+
+sub _propagate_blocks {
+    my ($self, $servers) = @_;
+
+    # Get all active blocks from database
+    my $sql = q{
+        SELECT DISTINCT ip, MAX(expires_at) as max_expires
+        FROM blocked_ips
+        WHERE expires_at > strftime('%s', 'now')
+        GROUP BY ip
+    };
+
+    my $sth = $self->{dbh}->prepare($sql);
+    $sth->execute();
+
+    my @blocks;
+    while (my ($ip, $expires) = $sth->fetchrow_array) {
+        push @blocks, { ip => $ip, expires => $expires };
+    }
+
+    $self->_log(debug => "Propagating " . scalar(@blocks) . " blocks to " . scalar(@$servers) . " servers");
+
+    for my $server (@$servers) {
+        for my $block (@blocks) {
+            my $ip = $block->{ip};
+            my $expires = $block->{expires};
+            my $ttl = $expires - time();
+            next if $ttl <= 0;  # Skip expired
+
+            # Check if already propagated
+            my ($status) = $self->{dbh}->selectrow_array(
+                "SELECT status FROM propagation_status WHERE ip = ? AND target_server = ?",
+                undef, $ip, $server
+            );
+
+            if ($status && $status eq 'propagated') {
+                # Already propagated, skip
+                next;
+            }
+
+            # Try to propagate
+            $self->_propagate_to_server($server, $ip, $ttl);
+        }
+    }
+}
+
+sub _propagate_to_server {
+    my ($self, $server, $ip, $ttl) = @_;
+    my $timeout = $self->{conf}->{remote_server_timeout} || 10;
+
+    my $cmd = qq{timeout $timeout ssh -o ConnectTimeout=$timeout -o BatchMode=yes $server 'nft add element inet filter badipv4 { $ip timeout ${ttl}s }' 2>&1};
+
+    my $output = `$cmd`;
+    my $exit_code = $? >> 8;
+    my $now = time();
+
+    if ($exit_code == 0) {
+        # Success
+        $self->_log(debug => "Propagated $ip to $server (TTL: ${ttl}s)");
+
+        my $sql = q{
+            INSERT INTO propagation_status (ip, target_server, status, propagated_at, last_attempt, attempt_count)
+            VALUES (?, ?, 'propagated', ?, ?, 1)
+            ON CONFLICT(ip, target_server) DO UPDATE SET
+                status = 'propagated',
+                propagated_at = excluded.propagated_at,
+                last_attempt = excluded.last_attempt,
+                attempt_count = propagation_status.attempt_count + 1,
+                error_message = NULL
+        };
+
+        eval { $self->{dbh}->do($sql, undef, $ip, $server, $now, $now) };
+        $@ and $self->_log(error => "Failed to update propagation_status: $@");
+
+    } else {
+        # Failed
+        chomp $output;
+        $self->_log(warn => "Failed to propagate $ip to $server: $output");
+
+        my $sql = q{
+            INSERT INTO propagation_status (ip, target_server, status, last_attempt, attempt_count, error_message)
+            VALUES (?, ?, 'failed', ?, 1, ?)
+            ON CONFLICT(ip, target_server) DO UPDATE SET
+                status = 'failed',
+                last_attempt = excluded.last_attempt,
+                attempt_count = propagation_status.attempt_count + 1,
+                error_message = excluded.error_message
+        };
+
+        eval { $self->{dbh}->do($sql, undef, $ip, $server, $now, $output) };
+        $@ and $self->_log(error => "Failed to update propagation_status: $@");
     }
 }
 

@@ -33,6 +33,7 @@ deb: clean
 	mkdir -p $(INSTALL_ROOT)/usr/local/etc/badips.d
 	mkdir -p $(INSTALL_ROOT)/etc/systemd/system
 	mkdir -p $(INSTALL_ROOT)/usr/share/doc/$(PACKAGE_NAME)
+	mkdir -p $(INSTALL_ROOT)/usr/local/share/bad_ips
 
 	# Copy DEBIAN control files
 	cp DEBIAN/control $(INSTALL_ROOT)/DEBIAN/
@@ -58,6 +59,10 @@ deb: clean
 
 	# Copy systemd service
 	cp etc/systemd/system/bad_ips.service $(INSTALL_ROOT)/etc/systemd/system/
+
+	# Copy scripts
+	cp scripts/migrate_database_v2.pl $(INSTALL_ROOT)/usr/local/share/bad_ips/
+	chmod +x $(INSTALL_ROOT)/usr/local/share/bad_ips/migrate_database_v2.pl
 
 	# Copy documentation
 	cp README.md $(INSTALL_ROOT)/usr/share/doc/$(PACKAGE_NAME)/

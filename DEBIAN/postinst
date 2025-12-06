@@ -30,6 +30,19 @@ if ! nft list set inet filter badipv4 >/dev/null 2>&1; then
     fi
 fi
 
+# Run database migration if database exists
+if [ -f /var/lib/bad_ips/bad_ips.sql ]; then
+    echo "Checking database schema version..."
+    if [ -f /usr/local/share/bad_ips/migrate_database_v2.pl ]; then
+        perl /usr/local/share/bad_ips/migrate_database_v2.pl --db-path /var/lib/bad_ips/bad_ips.sql
+        if [ $? -eq 0 ]; then
+            echo "Database schema up to date"
+        else
+            echo "WARNING: Database migration failed. Check logs."
+        fi
+    fi
+fi
+
 # Reload systemd daemon
 systemctl daemon-reload
 
