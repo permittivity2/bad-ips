@@ -1,0 +1,355 @@
+#!/usr/bin/env perl
+use strict;
+use warnings;
+
+use Getopt::Long qw(GetOptions);
+use Log::Log4perl qw(:easy);
+use Log::Any::Adapter ('Log4perl');
+
+# Log4perl config (syslog)
+my %logcfg = (
+  'log4perl.rootLogger'                       => 'INFO, SYS',
+  'log4perl.appender.SYS'                     => 'Log::Dispatch::Syslog',
+  'log4perl.appender.SYS.ident'               => 'bad_ips',
+  'log4perl.appender.SYS.facility'            => 'local0',
+  'log4perl.appender.SYS.layout'              => 'Log::Log4perl::Layout::PatternLayout',
+  'log4perl.appender.SYS.layout.ConversionPattern' => '%l|%m%n',
+);
+Log::Log4perl::init(\%logcfg);
+
+use lib '/usr/local/lib/site_perl';
+use BadIPs;
+
+my $conf_main = '/usr/local/etc/badips.conf';
+my $conf_dir  = '/usr/local/etc/badips.d';
+
+my $test_config = 0;
+my $dry_run     = 0;
+
+GetOptions(
+  'test-config!' => \$test_config,
+  'dry-run!'     => \$dry_run,
+) or die "Usage: $0 [--test-config] [--dry-run]\n";
+
+my $app = BadIPs->new(
+  conf_main => $conf_main,
+  conf_dir  => $conf_dir,
+  dry_run   => $dry_run,
+);
+
+if ($test_config) {
+  my ($ok, $msg, $report) = $app->test_config();
+  print $report;
+  exit($ok ? 0 : 1);
+}
+
+$app->run();
+
+
+
+# #!/usr/bin/env python3
+# import time
+# import subprocess
+# import re
+# import json
+# from systemd import journal
+# import uuid
+# from functools import lru_cache
+# from typing import List, Dict
+
+# BAD_CONNS =  [
+#     {"http_user_agent":"Mozilla/5.0 (compatible; InternetMeasurement/1.0; +https://internet-measurement.com/)"},
+#     {"host": "pfsense.forge.name", "http_user_agent":"curl/7.61.1"},
+#     {"host": "23.116.91.66", "status": "404" },
+#     {"host": "23.116.91.66", "status": "400", "request_uri": "/"},
+#     {"host": "23.116.91.66", "status": "200", "request_uri": "/"},
+#     {"host": "23.116.91.66", "status": "400", "request_uri": "-"},
+#     {"host": "23.116.91.66", "status": "400", "request_uri": ""},
+#     {"host": "_" },
+#     {"host": "mail.giraffenow.org" },
+#     {"host": "photos.forge.name" },
+#     {"host": "giraffenow.org", "status": "404" },
+#     {"host": "www.giraffenow.org", "status": "400" },
+#     {"host": "www.giraffenow.org", "status": "404" },
+#     {"request_uri": "/.git/config" },
+#     {"request_uri": "/login.rsp" },
+#     {"request_uri": "-"},
+#     {"request_uri": "/wp-login.php" },
+#     {"request_uri": "/wp-admin/" },
+#     {"request_uri": "/wp-content/plugins/" },
+#     {"request_uri": "/wp-content/themes/" },
+#     {"request_uri": "/wp-content/uploads/" },
+#     {"request_uri": "/wp-includes/" },
+#     {"request_uri": "/wp-json/" },
+#     {"request_uri": "/xmlrpc.php" },
+#     {"request_uri": "/wp-admin/admin-ajax.php" },
+#     {"request_uri": "/wp-admin/admin-post.php" },
+#     {"request_uri": "/wp-admin/admin" },
+# ]
+# NEVER_BLOCK_RE = [
+#     " gardner "
+# ]
+# NEVER_BLOCK_IPS = [
+# 	"138\\.199\\.99\\.70",
+# 	"138\\.199\\.99\\.66",
+#     "^23\\.116\\.91\\..*",
+#     "^10\\..*",
+#     "^192\\.168\\.*",
+#     "^127\\.*"
+# ]
+# BLOCKINGTIME = (86400 * 8) 
+# BLOCKED_IPS = {}
+# SLEEPTIME = 1
+# JOURNAL_LOOKBACK = SLEEPTIME + 1 # 1 second buffer
+# # JOURNAL_LOOKBACK = 6000
+# INITIAL_JOURNAL_LOOKBACK = 86400
+# HEARTBEAT = 60
+
+
+# def main():
+#     initial_load_blocked_ips()
+#     heartbeat_time = time.time() + HEARTBEAT
+#     log_message("Starting bad_ips", level="INFO")
+#     entries = read_journal("nginx.service", INITIAL_JOURNAL_LOOKBACK)
+
+#     while True:
+#         entries = bad_entries(entries)
+#         ips = remote_addresses(entries)
+#         ips = remove_never_block_ips(ips)
+#         ips = remove_already_blocked_ips(ips)
+#         add_ips_to_nft(ips)
+#         time.sleep(SLEEPTIME)
+#         remove_expired_ips()
+#         if time.time() > heartbeat_time:
+#             heartbeat_time = time.time() + HEARTBEAT
+#             log_message("Heartbeat", level="INFO")
+#         entries = read_journal("nginx.service", JOURNAL_LOOKBACK)
+    
+#     # entries = read_journal("nginx.service", JOURNAL_LOOKBACK)
+#     # # for entry in entries:
+#     # #     print(entry)
+    
+#     # entries = bad_entries(entries)
+#     # # print(f"Bad entries: {entries}")
+
+#     # # remote_addresses = []
+#     # # remote_addresses = [entry["remote_addr"] for entry in entries]
+#     # # print(f"Remote addresses: {remote_addresses}")
+#     # # remote_addresses = {}
+#     # # for entry in entries:
+#     # #     remote_addr = entry["remote_addr"]
+#     # #     if remote_addr in remote_addresses:
+#     # #         remote_addresses[remote_addr] += 1
+#     # #     else:
+#     # #         remote_addresses[remote_addr] = 1
+#     # ips = remote_addresses(entries)
+#     # print(f"Remote addresses: {ips}")
+
+#     # # Remove IPs that should never be blocked
+#     # ips = remove_never_block_ips(ips)
+#     # print(f"Remote addresses after removing never block IPs: {ips}")
+
+#     # # Remove IPS that are already blocked
+#     # ips = remove_already_blocked_ips(ips)
+#     # print(f"Remote addresses after removing already blocked IPs: {ips}")
+
+#     # # Add IPs to nftables
+#     # add_ips_to_nft(ips)
+
+#     # # Remove IPs that have expired
+#     # remove_expired_ips()
+
+# def remove_expired_ips():
+#     """Remove IPs from BLOCKED_IPS that have expired"""
+#     now = time.time()
+#     for ip in BLOCKED_IPS:
+#         if now > BLOCKED_IPS[ip]:
+#             log_message(f"Parolling IP {ip} from badipv4 set")
+#             del BLOCKED_IPS[ip]
+
+# def add_ips_to_nft(ips = []):
+#     """Add IPs to nftables to badipv4 set"""
+#     # Make sure ips are a uniuqe list
+#     ips = list(set(ips))
+#     # sort the list
+#     ips.sort()
+#     for ip in ips:
+#         if ( add_ip_to_nft(ip) ):
+#             BLOCKED_IPS[ip] = time.time() + BLOCKINGTIME
+#         else:
+#             log_message(f"Error adding IP {ip} to nftables.  Needs to be investigated", level="ERROR")
+
+# def add_ip_to_nft(ip):
+#     """Add an IP to nftables"""
+#     try:
+#         subprocess.run(["nft", "add", "element", "inet", "filter", "badipv4", f"{{ {ip} timeout {BLOCKINGTIME}s }}"],
+#                        check=True)
+#         log_message(f"Jailing IP {ip} to inet filter badipv4 with {BLOCKINGTIME}s timeout")
+#         return True
+#         exit(0)
+#     except subprocess.CalledProcessError as e:
+#         print(f"Error adding IP {ip} to nftables: {e}")
+#         return False
+
+# def remove_already_blocked_ips(ips):
+#     """Remove BLOCKED_IPS from ips"""
+#     final_ips = []
+#     for ip in ips:
+#         if ip in BLOCKED_IPS:
+#             # log_message(f"IP {ip} is already blocked")
+#             pass
+#         else:
+#             final_ips.append(ip)
+#     return final_ips
+
+# def remove_never_block_ips(ips):
+#     """Remove IPs from BLOCKED_IPS that should never be blocked"""
+#     for ip in ips:
+#         for key in NEVER_BLOCK_IPS:
+#             if re.match(ip, key):
+#                 del ips[ip]
+#     return ips
+
+# def remote_addresses(entries):
+#     """Return a list of remote addresses from the entries"""
+#     remote_addresses = []
+#     for entry in entries:
+#         remote_addresses.append(entry["remote_addr"])
+#     # Make sure it is a unique list
+#     remote_addresses = list(set(remote_addresses))
+#     return remote_addresses
+
+# # def bad_entries(entries):
+# #     """Return a list of entries that match the BAD_CONNS list"""
+# #     bad_entries = []
+# #     for entry in entries:
+# #         for bad in BAD_CONNS:
+# #             if all(item in entry.items() for item in bad.items()):
+# #                 bad_entries.append(entry)
+# #                 # print(f"Entry matches: {entry}")
+# #                 # log_message(f"Bad entry because it matches {bad}; orginal entry: {entry}")
+# #                 entry_ip = entry["remote_addr"]
+# #                 log_message(f"Bad IP {entry_ip} matched BAD_CONNS: >>{bad}<<")
+# #                 break
+# #             else:
+# #                 good = True
+# #                 # print(f"Entry does not match: {entry}")
+# #     return bad_entries
+
+# @lru_cache
+# def compile_bad_conns() -> List[frozenset]:
+#     """Compile BAD_CONNS into a list of frozensets for efficient matching."""
+#     return [frozenset(bad.items()) for bad in BAD_CONNS]
+
+# # def bad_entries(entries: List[Dict]) -> List[Dict]:
+# def bad_entries(entries):
+#     """
+#     Return a list of entries that match the BAD_CONNS list.
+#     Log the specific BAD_CONNS entry that caused the match.
+#     """
+#     # bad_conns = compile_bad_conns()
+#     bad_entries = []
+
+#     # for entry in entries:
+#     #     entry_set = frozenset(entry.items())
+#     #     for bad in bad_conns:
+#     #         if bad <= entry_set:  # Match if BAD_CONNS is a subset of the entry
+#     #             bad_entries.append(entry)
+#     #             entry_ip = entry.get("remote_addr", "unknown")
+#     #             # log_message(f"Bad IP {entry_ip} matched BAD_CONNS entry: {dict(bad)}. Full entry: {entry}")
+#     #             log_message(f"Bad IP {entry_ip} matched BAD_CONNS entry: {dict(bad)}.")
+#     #             break  # Stop checking once a match is found for this entry
+
+#     entries_to_check = len(entries)
+
+#     for journal_entry in entries:
+#         entries_to_check -= 1
+#         ip = journal_entry.get("remote_addr", "unknown")
+#         if ip == "unknown":
+#             continue
+#         if ip in BLOCKED_IPS:
+#             continue
+#         next_entry = False
+#         for re_str in NEVER_BLOCK_IPS:
+#             if re.search(re_str, ip):
+#                 next_entry = True
+#                 break
+#         if next_entry:
+#             continue
+#         log_message(f"Checking IP {ip} for bad connections.  Entries left to check: {entries_to_check}")
+#         for bad in BAD_CONNS:
+#             if all(item in journal_entry.items() for item in bad.items()):
+#                 bad_entries.append(journal_entry)
+#                 log_message(f"Bad IP {ip} matched BAD_CONNS entry: {bad}.")
+#                 break
+#     return bad_entries
+
+
+
+# def read_journal(service="nginx.service", lookback=(86400 * 7)):
+#     """Read the journal for the specified service and return the entries as a list of json objects"""
+#     j = journal.Reader()
+#     j.add_match(_SYSTEMD_UNIT=service)  # Match logs from 'service', default is 'ssh.service'
+#     j.seek_realtime(time.time() - lookback)
+    
+#     # return array of journal entries as a list in strings
+#     entries = []
+#     for entry in j:
+#         message = entry.get("MESSAGE", "")
+#         message = message[message.find("{"):]
+#         try:
+#             entries.append(json.loads(message))
+#         except json.JSONDecodeError as e:
+#             message = "{}"
+#             entries.append(json.loads(message))
+            
+#     return entries
+
+
+# def initial_load_blocked_ips():
+#     """Load IPs from nftables into BLOCKED_IPS"""
+#     nft_json = nft_as_json()
+#     # Get IP (elem) and when that IP times out (expires) from nftables
+#     for key in nft_json:
+#         if key == "nftables":
+#             for item in nft_json[key]:
+#                 if "set" in item:
+#                     if item["set"]["name"] == "badipv4":
+#                         if "elem" in item["set"]:
+#                             for elem in item["set"]["elem"]:
+#                                 expires = elem["elem"]["expires"] + time.time()
+#                                 ip = elem["elem"]["val"]
+#                                 BLOCKED_IPS[ip] = expires
+
+# def remove_expired_ips():
+#     """Remove IPs from BLOCKED_IPS that have expired"""
+#     now = time.time()
+#     for ip in BLOCKED_IPS:
+#         if now > BLOCKED_IPS[ip]:
+#             log_message(f"Parolling IP {ip} from badipv4 set")
+#             del BLOCKED_IPS[ip]
+
+# def nft_as_json():
+#     """Return nftables ruleset as a JSON object"""
+#     try:
+#         result = subprocess.run(["nft", "-j", "list", "ruleset"],
+#                                 capture_output=True, text=True, check=True)
+#         result = result.stdout
+#         # Convert to json object, if possible or throw exception
+#         return json.loads(result)
+#     except subprocess.CalledProcessError as e:
+#         print(f"Error retrieving nftables ruleset: {e}")
+#         return ""
+
+# def log_message(message, level="INFO", service="bad_ips"):
+#     # Log a message to the journal as service bad_ips
+#     j = journal.JournalHandler()
+#     message_id = str(uuid.uuid4())
+#     # j.send(message, SYSLOG_IDENTIFIER=service, PRIORITY=journal.LOG_INFO, MESSAGE_ID="bad_ips")
+#     j.send(message, SYSLOG_IDENTIFIER=service, PRIORITY=journal.LOG_INFO, MESSAGE_ID=message_id)
+
+# def process_logs():
+#     print("Processing logs")
+
+# if __name__ == "__main__":
+#     main()

@@ -1,0 +1,33 @@
+# Build artifacts
+*.deb
+*.buildinfo
+*.changes
+
+# Debian packaging temporary files
+debian/files
+debian/*.log
+debian/*.substvars
+debian/bad-ips/
+
+# Backup files
+*~
+*.bak
+*.swp
+*.swo
+
+# Database files (should not be in source)
+*.sql
+*.db
+*.sqlite
+
+# Logs
+*.log
+
+# Editor files
+.vscode/
+.idea/
+*.sublime-*
+
+# OS files
+.DS_Store
+Thumbs.db

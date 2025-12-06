@@ -1,0 +1,36 @@
+[global]
+# seconds
+blocking_time = 691200        ; 8 days
+sleep_time    = 1
+heartbeat     = 60
+extra_time    = 120
+auto_mode = 1                 ; 0/1. If 1, discover sources automatically
+auto_candidates = sshd,postfix,dovecot,nginx,apache,opendkim,bind9,named
+exclude_units =               ; optional: comma list of units to ignore
+max_journal_lookback = 900    ; cap for auto units if you want a shorter window
+
+
+# journald units (comma separated)
+journal_units = ssh
+
+# regexes to flag "bad" events (comma separated)
+bad_conn_patterns = Failed password for invalid user,Failed password for root,Failed password for,Failed password for .* from,Failed password for .* from .* port
+
+# CIDR subnets never to block (comma separated)
+never_block_cidrs = 23.116.91.65/29,10.0.0.0/8,192.168.1.0/24,127.0.0.0/8,0.0.0.0/8,224.0.0.0/4,240.0.0.0/4,169.254.0.0/16,172.16.0.0/12
+
+# DB paths
+db_dir  = /var/lib/bad_ips
+db_file = /var/lib/bad_ips/bad_ips.sql
+
+# logging (INFO, DEBUG, etc)
+log_level = INFO
+
+# nftables set/table
+nft_table = inet
+nft_family_table = filter
+nft_set   = badipv4
+
+# initial journal lookback seconds
+initial_journal_lookback = 87400
+
