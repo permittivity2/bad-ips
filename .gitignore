@@ -31,3 +31,4 @@ debian/bad-ips/
 # OS files
 .DS_Store
 Thumbs.db
+build/
