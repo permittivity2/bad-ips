@@ -1,6 +1,19 @@
 #!/bin/bash
 set -e
 
+# On upgrade, save the service state
+if [ "$1" = "upgrade" ]; then
+    # Check if service was enabled
+    if systemctl is-enabled --quiet bad_ips.service 2>/dev/null; then
+        touch /tmp/bad_ips_was_enabled
+    fi
+
+    # Check if service was active
+    if systemctl is-active --quiet bad_ips.service; then
+        touch /tmp/bad_ips_was_active
+    fi
+fi
+
 # Stop service if running
 if systemctl is-active --quiet bad_ips.service; then
     systemctl stop bad_ips.service
