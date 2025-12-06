@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bad IPs - Distributed IP Blocking System | Silver Linings, LLC</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+            overflow: hidden;
+        }
+
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px 30px;
+            text-align: center;
+        }
+
+        h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            font-weight: 700;
+        }
+
+        .tagline {
+            font-size: 1.2em;
+            opacity: 0.9;
+            margin-bottom: 10px;
+        }
+
+        .alpha-badge {
+            display: inline-block;
+            background: #ff6b6b;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            font-weight: bold;
+            margin-top: 10px;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        .content {
+            padding: 40px 30px;
+        }
+
+        h2 {
+            color: #667eea;
+            margin-top: 30px;
+            margin-bottom: 15px;
+            font-size: 1.8em;
+        }
+
+        .install-box {
+            background: #f8f9fa;
+            border-left: 4px solid #667eea;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+
+        .install-command {
+            background: #2d2d2d;
+            color: #f8f8f2;
+            padding: 15px 20px;
+            border-radius: 6px;
+            font-family: 'Monaco', 'Courier New', monospace;
+            font-size: 0.95em;
+            overflow-x: auto;
+            position: relative;
+        }
+
+        .copy-button {
+            position: absolute;
+            right: 10px;
+            top: 10px;
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 5px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.85em;
+        }
+
+        .copy-button:hover {
+            background: #5568d3;
+        }
+
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin: 30px 0;
+        }
+
+        .feature {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            border-top: 3px solid #667eea;
+        }
+
+        .feature h3 {
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+
+        .warning {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 4px;
+        }
+
+        .warning strong {
+            color: #856404;
+        }
+
+        footer {
+            background: #2d2d2d;
+            color: #ccc;
+            padding: 20px 30px;
+            text-align: center;
+            font-size: 0.9em;
+        }
+
+        footer a {
+            color: #667eea;
+            text-decoration: none;
+        }
+
+        footer a:hover {
+            text-decoration: underline;
+        }
+
+        code {
+            background: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Monaco', 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+
+        ul {
+            margin-left: 20px;
+            margin-bottom: 20px;
+        }
+
+        li {
+            margin-bottom: 8px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🛡️ Bad IPs</h1>
+            <p class="tagline">Distributed IP Blocking System</p>
+            <p>Hunter-Gatherer Architecture for Network Security</p>
+            <span class="alpha-badge">⚠️ ALPHA SOFTWARE - Early Testing</span>
+        </header>
+
+        <div class="content">
+            <h2>🚀 One-Line Installation</h2>
+            <div class="install-box">
+                <p>Install Bad IPs on Ubuntu/Debian with a single command:</p>
+                <div class="install-command">
+                    <button class="copy-button" onclick="copyInstall()">Copy</button>
+                    <code id="install-cmd">curl -fsSL https://projects.thedude.vip/bad-ips/install.sh | sudo bash</code>
+                </div>
+            </div>
+
+            <div class="warning">
+                <strong>⚠️ Alpha Warning:</strong> This software is in early alpha testing. Use at your own risk.
+                Always test in a non-production environment first. Make sure you configure <code>never_block_cidrs</code>
+                to avoid locking yourself out!
+            </div>
+
+            <h2>✨ Features</h2>
+            <div class="features">
+                <div class="feature">
+                    <h3>🎯 Hunter Mode</h3>
+                    <p>Monitors local logs in real-time, blocks malicious IPs locally using nftables.</p>
+                </div>
+                <div class="feature">
+                    <h3>🌐 Gatherer Mode</h3>
+                    <p>Aggregates blocks from all servers and propagates them across your infrastructure.</p>
+                </div>
+                <div class="feature">
+                    <h3>⚡ Fast Detection</h3>
+                    <p>Real-time log monitoring with systemd journal integration for instant blocking.</p>
+                </div>
+                <div class="feature">
+                    <h3>🔧 Configurable</h3>
+                    <p>Per-service attack pattern detection for SSH, Postfix, Dovecot, Nginx, BIND, and more.</p>
+                </div>
+            </div>
+
+            <h2>📖 How It Works</h2>
+            <ul>
+                <li><strong>Hunter servers</strong> monitor their own logs and block malicious IPs locally</li>
+                <li><strong>Gatherer server</strong> collects blocked IPs from all hunters</li>
+                <li>IPs blocked on any server are automatically propagated to ALL servers</li>
+                <li>Built-in never-block CIDR filtering protects your trusted networks</li>
+                <li>Automatic expiration and cleanup (default: 8 days)</li>
+            </ul>
+
+            <h2>🛠️ Supported Services</h2>
+            <p>Out-of-the-box detection for:</p>
+            <ul>
+                <li>SSH (sshd) - Brute force attacks</li>
+                <li>Postfix - Mail server attacks</li>
+                <li>Dovecot - IMAP/POP3 attacks</li>
+                <li>Nginx - Web server attacks</li>
+                <li>Apache - Web server attacks</li>
+                <li>BIND - DNS attacks</li>
+            </ul>
+
+            <h2>📦 Manual Installation</h2>
+            <p>If you prefer manual installation:</p>
+            <div class="install-command">
+                <code>echo "deb [trusted=yes] https://projects.thedude.vip/apt/ ./" | sudo tee /etc/apt/sources.list.d/badips.list<br>
+sudo apt update<br>
+sudo apt install bad-ips</code>
+            </div>
+
+            <h2>📚 Documentation</h2>
+            <p>After installation, configuration files are located at:</p>
+            <ul>
+                <li><code>/usr/local/etc/badips.conf</code> - Main configuration</li>
+                <li><code>/usr/local/etc/badips.d/*.conf</code> - Detector configurations</li>
+                <li><code>/var/lib/bad_ips/bad_ips.sql</code> - SQLite database</li>
+            </ul>
+
+            <p>Useful commands:</p>
+            <div class="install-command">
+                <code># View service status<br>
+sudo systemctl status bad_ips.service<br>
+<br>
+# View logs<br>
+sudo journalctl -u bad_ips.service -f<br>
+<br>
+# List blocked IPs<br>
+sudo nft list set inet filter badipv4</code>
+            </div>
+
+            <h2>⚠️ Important Security Notes</h2>
+            <div class="warning">
+                <ul>
+                    <li><strong>Configure never_block_cidrs:</strong> Always include your management network and static IPs</li>
+                    <li><strong>Test first:</strong> Deploy to a non-critical system first</li>
+                    <li><strong>Monitor logs:</strong> Watch for false positives initially</li>
+                    <li><strong>Backup access:</strong> Have console/IPMI access in case of lockouts</li>
+                </ul>
+            </div>
+
+            <h2>🤝 Support & Contributing</h2>
+            <p>This is an alpha release. Report issues, request features, or contribute at:</p>
+            <ul>
+                <li><a href="https://github.com/gardner/bad-ips">GitHub Repository</a></li>
+                <li>Email: gardner@thedude.vip</li>
+            </ul>
+        </div>
+
+        <footer>
+            <p>Bad IPs v1.0.0 &copy; 2025 <strong>Silver Linings, LLC</strong></p>
+            <p>Released under open source license | <a href="https://projects.thedude.vip/">More Projects</a></p>
+        </footer>
+    </div>
+
+    <script>
+        function copyInstall() {
+            const cmd = document.getElementById('install-cmd').textContent;
+            navigator.clipboard.writeText(cmd).then(() => {
+                const btn = document.querySelector('.copy-button');
+                btn.textContent = 'Copied!';
+                setTimeout(() => {
+                    btn.textContent = 'Copy';
+                }, 2000);
+            });
+        }
+    </script>
+</body>
+</html>
