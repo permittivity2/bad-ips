@@ -1066,6 +1066,12 @@ sub _propagate_blocks {
             my $ttl = $expires - time();
             next if $ttl <= 0;  # Skip expired
 
+            # Skip IPs in never_block_cidrs
+            if ($self->_should_skip_ip($ip)) {
+                $self->_log(debug => "Skipping propagation of $ip (in never_block_cidrs)");
+                next;
+            }
+
             # Check if already propagated
             my ($status) = $self->{dbh}->selectrow_array(
                 "SELECT status FROM propagation_status WHERE ip = ? AND target_server = ?",
