@@ -76,16 +76,16 @@ else
     echo "To upgrade: review changes in the template files if needed"
 
     # On upgrade, restore service state
-    if [ -f /tmp/bad_ips_was_enabled ]; then
+    if [ -f /var/lib/bad_ips/.upgrade_was_enabled ]; then
         echo "Re-enabling bad_ips.service (was enabled before upgrade)"
         systemctl enable bad_ips.service
-        rm -f /tmp/bad_ips_was_enabled
+        rm -f /var/lib/bad_ips/.upgrade_was_enabled
     fi
 
-    if [ -f /tmp/bad_ips_was_active ]; then
+    if [ -f /var/lib/bad_ips/.upgrade_was_active ]; then
         echo "Restarting bad_ips.service (was active before upgrade)"
         systemctl start bad_ips.service
-        rm -f /tmp/bad_ips_was_active
+        rm -f /var/lib/bad_ips/.upgrade_was_active
     fi
 fi
 
