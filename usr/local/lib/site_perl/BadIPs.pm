@@ -1087,7 +1087,13 @@ sub _propagate_to_server {
     my ($self, $server, $ip, $ttl) = @_;
     my $timeout = $self->{conf}->{remote_server_timeout} || 10;
 
-    my $cmd = qq{timeout $timeout ssh -o ConnectTimeout=$timeout -o BatchMode=yes $server 'nft add element inet filter badipv4 { $ip timeout ${ttl}s }' 2>&1};
+    # Ensure TTL is an integer (nftables doesn't accept decimals)
+    $ttl = int($ttl + 0.5);  # Round to nearest integer
+
+    # Cap maximum TTL to 8 days (691200 seconds)
+    $ttl = 691200 if $ttl > 691200;
+
+    my $cmd = qq{timeout $timeout ssh -o ConnectTimeout=$timeout -o BatchMode=yes $server 'sudo nft add element inet filter badipv4 { $ip timeout ${ttl}s }' 2>&1};
 
     my $output = `$cmd`;
     my $exit_code = $? >> 8;
