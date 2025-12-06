@@ -958,7 +958,9 @@ sub _gather_from_remote_servers {
             my $exit_code = $? >> 8;
 
             if ($exit_code != 0) {
-                $self->_log(warn => "Failed to query $server (exit code: $exit_code)");
+                my $error = join('', @lines) || 'no error output';
+                $error =~ s/\n/ /g;  # Collapse to single line
+                $self->_log(warn => "Failed to query $server (exit code: $exit_code): $error");
                 return;
             }
 
