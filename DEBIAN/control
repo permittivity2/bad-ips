@@ -1,5 +1,5 @@
 Package: bad-ips
-Version: 1.0.0
+Version: 1.1.0
 Section: admin
 Priority: optional
 Architecture: all
@@ -17,4 +17,4 @@ Description: Distributed IP blocking system with hunter-gatherer architecture
   - Configurable per-service attack pattern detection
   - Never-block CIDR filtering for trusted networks
   - Automatic expiration and cleanup of stale blocks
-Homepage: https://github.com/gardner/bad-ips
+Homepage: https://github.com/permittivity2/bad-ips
