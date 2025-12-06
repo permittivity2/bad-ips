@@ -14,7 +14,7 @@ Bad IPs uses INI-style configuration files. The main config is `/usr/local/etc/b
 
 ```ini
 [global]
-never_block_cidrs = 23.116.91.65/29,10.0.0.0/8,192.168.1.0/24,127.0.0.0/8,0.0.0.0/8,224.0.0.0/4,240.0.0.0/4,169.254.0.0/16,172.16.0.0/12
+never_block_cidrs = 10.0.0.0/8,192.168.1.0/24,127.0.0.0/8,0.0.0.0/8,224.0.0.0/4,240.0.0.0/4,169.254.0.0/16,172.16.0.0/12
 ```
 
 **Common CIDRs to include:**
@@ -268,7 +268,7 @@ sudo journalctl -u bad_ips.service -f
 [global]
 mode = hunter
 blocking_time = 691200
-never_block_cidrs = 23.116.91.65/29,10.0.0.0/8,192.168.1.0/24,127.0.0.0/8
+never_block_cidrs = 10.0.0.0/8,192.168.1.0/24,127.0.0.0/8
 db_dir = /var/lib/bad_ips
 db_file = /var/lib/bad_ips/bad_ips.sql
 nft_table = inet
@@ -283,7 +283,7 @@ log_level = INFO
 [global]
 mode = gatherer
 blocking_time = 691200
-never_block_cidrs = 23.116.91.65/29,10.0.0.0/8,192.168.1.0/24,127.0.0.0/8
+never_block_cidrs = 10.0.0.0/8,192.168.1.0/24,127.0.0.0/8
 propagation_delay = 5
 remote_server_timeout = 10
 remote_server_timeout_action = log_only

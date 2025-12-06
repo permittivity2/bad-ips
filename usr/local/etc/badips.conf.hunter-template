@@ -17,7 +17,7 @@ journal_units = ssh
 bad_conn_patterns = Failed password for invalid user,Failed password for root,Failed password for,Failed password for .* from,Failed password for .* from .* port
 
 # CIDR subnets never to block (comma separated)
-never_block_cidrs = 23.116.91.65/29,10.0.0.0/8,192.168.1.0/24,127.0.0.0/8,0.0.0.0/8,224.0.0.0/4,240.0.0.0/4,169.254.0.0/16,172.16.0.0/12
+never_block_cidrs = 10.0.0.0/8,192.168.0.0/16,172.16.0.0/12,127.0.0.0/8,0.0.0.0/8,224.0.0.0/4,240.0.0.0/4,169.254.0.0/16
 
 # DB paths
 db_dir  = /var/lib/bad_ips

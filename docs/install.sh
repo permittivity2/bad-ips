@@ -183,7 +183,7 @@ show_status() {
     echo "  Database:    /var/lib/bad_ips/bad_ips.sql"
     echo ""
     echo "Documentation: https://projects.thedude.vip/bad-ips/"
-    echo "Support:       https://github.com/gardner/bad-ips/issues"
+    echo "Support:       https://github.com/permittivity2/bad-ips/issues"
     echo ""
     echo -e "${YELLOW}⚠ ALPHA SOFTWARE - Use at your own risk!${NC}"
     echo ""
