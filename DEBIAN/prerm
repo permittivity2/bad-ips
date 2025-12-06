@@ -1,19 +1,20 @@
 #!/bin/bash
 set -e
 
-# On upgrade, save the service state to a persistent location
-if [ "$1" = "upgrade" ]; then
-    mkdir -p /var/lib/bad_ips
+# Save service state before stopping (for upgrade restore)
+# During upgrade, $1 = "upgrade" and $2 = new-version
+# During removal, $1 = "remove"
+mkdir -p /var/lib/bad_ips
 
-    # Check if service was enabled
-    if systemctl is-enabled --quiet bad_ips.service 2>/dev/null; then
-        touch /var/lib/bad_ips/.upgrade_was_enabled
-    fi
+# Always save state if enabled/active (we'll clean up in postrm if it's a removal)
+if systemctl is-enabled --quiet bad_ips.service 2>/dev/null; then
+    touch /var/lib/bad_ips/.upgrade_was_enabled
+    echo "Saving enabled state for upgrade"
+fi
 
-    # Check if service was active
-    if systemctl is-active --quiet bad_ips.service; then
-        touch /var/lib/bad_ips/.upgrade_was_active
-    fi
+if systemctl is-active --quiet bad_ips.service; then
+    touch /var/lib/bad_ips/.upgrade_was_active
+    echo "Saving active state for upgrade"
 fi
 
 # Stop service if running
@@ -22,7 +23,7 @@ if systemctl is-active --quiet bad_ips.service; then
     echo "Stopped bad_ips.service"
 fi
 
-# Disable service if enabled
+# Disable service if enabled (will be re-enabled in postinst if upgrade)
 if systemctl is-enabled --quiet bad_ips.service 2>/dev/null; then
     systemctl disable bad_ips.service
     echo "Disabled bad_ips.service"
