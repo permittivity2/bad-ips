@@ -1067,10 +1067,15 @@ sub _propagate_blocks {
             next if $ttl <= 0;  # Skip expired
 
             # Skip IPs in never_block_cidrs
-            if ($self->_should_skip_ip($ip)) {
-                $self->_log(debug => "Skipping propagation of $ip (in never_block_cidrs)");
-                next;
+            my $skip = 0;
+            for my $cidr (@{$self->{conf}->{never_block_cidrs}}) {
+                if (cidrlookup($ip, $cidr)) {
+                    $self->_log(debug => "Skipping propagation of $ip (in $cidr)");
+                    $skip = 1;
+                    last;
+                }
             }
+            next if $skip;
 
             # Check if already propagated
             my ($status) = $self->{dbh}->selectrow_array(
