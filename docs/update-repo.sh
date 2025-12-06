@@ -16,10 +16,25 @@ gzip -9c Packages > Packages.gz
 echo "✓ Packages files generated"
 echo ""
 
-# Update Release file timestamp
-echo "Updating Release file..."
-sed -i "s/^Date:.*/Date: $(date -u '+%a, %d %b %Y %H:%M:%S UTC')/" Release
-echo "✓ Release file updated"
+# Generate Release file with hashes
+echo "Generating Release file..."
+cat > Release <<EOF
+Origin: Silver Linings, LLC
+Label: bad-ips
+Suite: stable
+Codename: homelab
+Architectures: all amd64
+Components: main
+Description: Bad IPs - Distributed IP Blocking System
+Date: $(date -u '+%a, %d %b %Y %H:%M:%S UTC')
+MD5Sum:
+$(for f in Packages Packages.gz; do echo " $(md5sum $f | cut -d' ' -f1) $(stat -c%s $f) $f"; done)
+SHA1:
+$(for f in Packages Packages.gz; do echo " $(sha1sum $f | cut -d' ' -f1) $(stat -c%s $f) $f"; done)
+SHA256:
+$(for f in Packages Packages.gz; do echo " $(sha256sum $f | cut -d' ' -f1) $(stat -c%s $f) $f"; done)
+EOF
+echo "✓ Release file generated"
 echo ""
 
 # Sign Release file with GPG
