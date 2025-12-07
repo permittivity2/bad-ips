@@ -11,16 +11,32 @@ use Time::HiRes qw(time sleep);
 use POSIX qw(strftime);
 use JSON qw(decode_json);
 use DBI;
+use DBD::Pg;  # PostgreSQL driver
 use Log::Any qw($log);
 use Regexp::Common qw(net);
 use Net::CIDR qw(cidrlookup);
 use Sys::Hostname qw(hostname);
 use File::ReadBackwards;
 
-our $VERSION = '0.01';
+# Threading support
+use threads;
+use threads::shared;
+use Thread::Queue;
+
+our $VERSION = '1.2.0';  # Phase 10: Threading + PostgreSQL
 
 # Service -> how to read + patterns (moved to conf.d, kept empty here)
 my %DETECTORS = ();
+
+# Shared threading state
+my $shutdown :shared = 0;
+my $shutdown_start_time :shared = 0;
+
+# Thread-safe queues (initialized in new())
+# These are NOT shared variables themselves, but Thread::Queue handles thread-safety internally
+my $ips_to_block_queue;
+my $record_blocked_ip_queue;
+my $sync_to_central_db_queue;
 
 sub new {
     my ($class, %args) = @_;
@@ -29,19 +45,24 @@ sub new {
         conf_main  => $args{conf_main} // '/usr/local/etc/badips.conf',
         conf_dir   => $args{conf_dir}  // '/usr/local/etc/badips.d',
         conf       => {},
-        dbh        => undef,
+        dbh        => undef,            # Local SQLite handle
+        central_dbh => undef,           # Central PostgreSQL handle
         sth_upsert => undef,
-        blocked    => {},   # ip => epoch_expires
+        blocked    => {},               # ip => epoch_expires
         run_count  => 0,
         dry_run    => $args{dry_run} ? 1 : 0,
-        remote_state => {}, # for future remote fetch cadence
+        remote_state => {},             # for future remote fetch cadence
+        threads    => [],               # Thread objects
+        queue_exceeded_start => {},     # Track queue overflow times
     };
 
     bless $self, $class;
     $self->_load_config();
+    $self->_init_queues();              # Initialize Thread::Queue objects
     $self->{detectors} = $self->_load_detectors_from_confdir();
-    $self->_auto_discover_sources();   # compiles patterns + sources
-    $self->_init_db();
+    $self->_auto_discover_sources();    # compiles patterns + sources
+    $self->_init_db();                  # Local SQLite
+    $self->_init_central_db();          # Central PostgreSQL
     $self->_initial_load_blocked_ips();
     return $self;
 }
@@ -103,6 +124,94 @@ sub _load_config {
     $accum{file_sources}      = _csv_to_array($accum{file_sources});
 
     $self->{conf} = \%accum;
+
+    # Phase 10: Add threading configuration defaults
+    $self->{conf}->{ips_to_block_queue_max}                 //= 5000;
+    $self->{conf}->{record_blocked_ip_queue_max}            //= 5000;
+    $self->{conf}->{record_blocked_ip_queue_critical_time}  //= 300;
+    $self->{conf}->{sync_to_central_db_queue_max}           //= 10000;
+    $self->{conf}->{sync_to_central_db_queue_critical_time} //= 300;
+    $self->{conf}->{central_db_batch_size}                  //= 1000;
+    $self->{conf}->{central_db_batch_timeout}               //= 5;
+    $self->{conf}->{pull_min_interval}                      //= 2;
+    $self->{conf}->{pull_step_interval}                     //= 4;
+    $self->{conf}->{pull_initial_interval}                  //= 20;
+    $self->{conf}->{pull_max_interval}                      //= 180;
+    $self->{conf}->{failover_log}                           //= '/var/lib/bad_ips/failover.log';
+    $self->{conf}->{failover_enabled}                       //= 1;
+    $self->{conf}->{graceful_shutdown_timeout}              //= 300;
+
+    # PostgreSQL configuration defaults
+    $self->{conf}->{db_type}                                //= 'postgresql';
+    $self->{conf}->{db_host}                                //= '10.10.0.116';
+    $self->{conf}->{db_port}                                //= 5432;
+    $self->{conf}->{db_name}                                //= 'bad_ips';
+    $self->{conf}->{db_user}                                //= 'bad_ips_hunter';
+    $self->{conf}->{db_pass_file}                           //= '/etc/bad_ips/db_password';
+    $self->{conf}->{db_ssl_mode}                            //= 'disable';
+}
+
+# Initialize thread-safe queues
+sub _init_queues {
+    my ($self) = @_;
+
+    $ips_to_block_queue = Thread::Queue->new();
+    $record_blocked_ip_queue = Thread::Queue->new();
+    $sync_to_central_db_queue = Thread::Queue->new();
+
+    $self->_log(debug => "Initialized thread-safe queues");
+}
+
+# Initialize central PostgreSQL database connection
+sub _init_central_db {
+    my ($self) = @_;
+
+    return if $self->{dry_run};
+
+    my $conf = $self->{conf};
+
+    # Read password from file
+    my $pass_file = $conf->{db_pass_file};
+    if (!-f $pass_file) {
+        $self->_log(warn => "PostgreSQL password file not found: $pass_file");
+        $self->_log(warn => "Central DB sync will be disabled");
+        return;
+    }
+
+    open my $fh, '<', $pass_file or do {
+        $self->_log(error => "Cannot read password file $pass_file: $!");
+        return;
+    };
+    chomp(my $password = <$fh>);
+    close $fh;
+
+    my $dsn = sprintf(
+        "dbi:Pg:dbname=%s;host=%s;port=%s;sslmode=%s",
+        $conf->{db_name},
+        $conf->{db_host},
+        $conf->{db_port},
+        $conf->{db_ssl_mode}
+    );
+
+    eval {
+        $self->{central_dbh} = DBI->connect(
+            $dsn,
+            $conf->{db_user},
+            $password,
+            {
+                RaiseError => 1,
+                AutoCommit => 1,
+                PrintError => 0,
+            }
+        );
+        $self->_log(info => "Connected to PostgreSQL: $conf->{db_host}:$conf->{db_port}/$conf->{db_name}");
+    };
+
+    if ($@) {
+        $self->_log(error => "Failed to connect to PostgreSQL: $@");
+        $self->_log(warn => "Central DB sync will be disabled");
+        $self->{central_dbh} = undef;
+    }
 }
 
 sub _load_detectors_from_confdir {
@@ -516,68 +625,419 @@ sub run {
     }
 }
 
+# ==================== PHASE 10: THREAD FUNCTIONS ====================
+
+# Thread: nft_blocker_thread
+# CRITICAL: This thread must NEVER block on I/O
+# Purpose: Pop from ips_to_block_queue, add to nftables, push to record_blocked_ip_queue
+sub nft_blocker_thread {
+    my ($self) = @_;
+    $self->_log(info => "nft_blocker_thread started");
+
+    my $set = $self->{conf}->{nft_set};
+    my $tab = $self->{conf}->{nft_family_table};
+    my $fam = $self->{conf}->{nft_table};
+    my $ttl = $self->{conf}->{blocking_time};
+
+    while (!$shutdown) {
+        # Non-blocking dequeue with 1 second timeout
+        my $item = $ips_to_block_queue->dequeue_timed(1);
+        next unless $item;
+
+        my $ip = $item->{ip};
+        my $source = $item->{source} || 'unknown';
+        my $detector = $item->{detector} || 'unknown';
+        my $log_line = $item->{line};
+
+        # Skip if already blocked
+        if (exists $self->{blocked}{$ip}) {
+            next;
+        }
+
+        # Check never_block_cidrs
+        if ($self->_is_never_block_ip($ip)) {
+            $self->_log(debug => "Skipping never-block IP: $ip");
+            next;
+        }
+
+        # Execute nft command (FAST - no I/O wait!)
+        my $cmd = "nft add element $fam $tab $set { $ip timeout ${ttl}s }";
+
+        if ($self->{dry_run}) {
+            $self->_log(info => "[dry-run] would jail $ip for ${ttl}s");
+            my $exp = time() + $ttl;
+            $self->{blocked}{$ip} = $exp;
+
+            # Even in dry-run, queue for recording
+            $record_blocked_ip_queue->enqueue({
+                ip => $ip,
+                expires_at => $exp,
+                source => $source,
+                detector => $detector,
+                log_line => $log_line,
+            });
+            next;
+        }
+
+        # Execute nft command
+        if (system($cmd) == 0) {
+            my $exp = time() + $ttl;
+            $self->{blocked}{$ip} = $exp;
+
+            $self->_log(info => "Jailed $ip for ${ttl}s (source: $source, detector: $detector)");
+
+            # Enqueue for database recording (async)
+            $record_blocked_ip_queue->enqueue({
+                ip => $ip,
+                expires_at => $exp,
+                source => $source,
+                detector => $detector,
+                log_line => $log_line,
+            });
+        } else {
+            $self->_log(error => "nft add failed for $ip: $!");
+        }
+    }
+
+    $self->_log(info => "nft_blocker_thread shutting down");
+}
+
+# Helper: Check if IP is in never_block_cidrs
+sub _is_never_block_ip {
+    my ($self, $ip) = @_;
+    my $cidrs = $self->{conf}->{never_block_cidrs} || [];
+    return 0 unless @$cidrs;
+    return cidrlookup($ip, @$cidrs);
+}
+
+# Thread: local_db_recorder_thread
+# Purpose: Pop from record_blocked_ip_queue, write to local SQLite, push to sync_to_central_db_queue
+sub local_db_recorder_thread {
+    my ($self) = @_;
+    $self->_log(info => "local_db_recorder_thread started");
+
+    while (!$shutdown || $record_blocked_ip_queue->pending() > 0) {
+        my $item = $record_blocked_ip_queue->dequeue_timed(1);
+        next unless $item;
+
+        my $ip = $item->{ip};
+        my $exp = $item->{expires_at};
+
+        # Write to local SQLite (blocking I/O is acceptable here)
+        eval {
+            $self->_db_upsert_jailed_ip($ip, $exp);
+            $self->_db_upsert_blocked_ip($ip, $exp, {
+                service => $item->{source},
+                detector => $item->{detector},
+            });
+        };
+        if ($@) {
+            $self->_log(error => "Local DB upsert failed for $ip: $@");
+        }
+
+        # Enqueue for central DB sync
+        $sync_to_central_db_queue->enqueue($item);
+    }
+
+    $self->_log(info => "local_db_recorder_thread shutting down (drained queue)");
+}
+
+# Thread: central_db_sync_thread
+# Purpose: Pop from sync_to_central_db_queue (batched), write to PostgreSQL
+sub central_db_sync_thread {
+    my ($self) = @_;
+    $self->_log(info => "central_db_sync_thread started");
+
+    return unless $self->{central_dbh};  # Skip if no central DB
+
+    my $batch_size = $self->{conf}->{central_db_batch_size};
+    my $queue_max = $self->{conf}->{sync_to_central_db_queue_max};
+    my $critical_time = $self->{conf}->{sync_to_central_db_queue_critical_time};
+    my $hostname = hostname();
+
+    while (!$shutdown || $sync_to_central_db_queue->pending() > 0) {
+        my $queue_size = $sync_to_central_db_queue->pending();
+
+        # Check for critical queue overflow
+        if ($queue_size > $queue_max) {
+            $self->{queue_exceeded_start}{central_db} ||= time();
+            my $exceeded_duration = time() - $self->{queue_exceeded_start}{central_db};
+
+            if ($exceeded_duration > $critical_time) {
+                $self->_log(error => "CRITICAL: Central DB queue exceeded $queue_max for ${exceeded_duration}s, failing over to disk");
+
+                # Drain to failover log
+                my $drained = 0;
+                while (my $item = $sync_to_central_db_queue->dequeue_nb()) {
+                    $self->_append_to_failover_log($item) or $self->_log(warn => "Cannot write failover log, dropping IP: $item->{ip}");
+                    $drained++;
+                }
+
+                $self->_log(warn => "Drained $drained items to failover log");
+                $self->{queue_exceeded_start}{central_db} = 0;
+                sleep 60;  # Back off
+                next;
+            }
+        } else {
+            $self->{queue_exceeded_start}{central_db} = 0;
+        }
+
+        # Collect batch
+        my @batch;
+        my $timeout = 1;
+        while (@batch < $batch_size) {
+            my $item = $sync_to_central_db_queue->dequeue_timed($timeout);
+            last unless $item;
+            push @batch, $item;
+            $timeout = 0;  # After first item, don't wait
+        }
+
+        next unless @batch;
+
+        # Batch INSERT to PostgreSQL
+        eval {
+            for my $item (@batch) {
+                my $sth = $self->{central_dbh}->prepare(
+                    "SELECT record_blocked_ip(?, ?, ?, NOW() + INTERVAL '? seconds', ?)"
+                );
+                $sth->execute(
+                    $hostname,
+                    $item->{ip},
+                    $item->{detector},
+                    $self->{conf}->{blocking_time},
+                    $item->{log_line}
+                );
+            }
+        };
+
+        if ($@) {
+            $self->_log(error => "Central DB batch INSERT failed: $@, requeueing " . scalar(@batch) . " items");
+            $sync_to_central_db_queue->enqueue($_) for @batch;
+            sleep 10;  # Back off
+        } else {
+            $self->_log(debug => "Synced " . scalar(@batch) . " IPs to central DB");
+        }
+    }
+
+    $self->_log(info => "central_db_sync_thread shutting down (drained queue)");
+}
+
+# Helper: Append to failover log
+sub _append_to_failover_log {
+    my ($self, $item) = @_;
+    my $log_file = $self->{conf}->{failover_log};
+
+    return 0 unless $self->{conf}->{failover_enabled};
+
+    eval {
+        open my $fh, '>>', $log_file or die $!;
+        print $fh join("\t",
+            time(),
+            hostname(),
+            $item->{ip},
+            $item->{source},
+            $item->{detector}
+        ) . "\n";
+        close $fh;
+        1;
+    } or do {
+        $self->_log(error => "Failed to write failover log: $@");
+        return 0;
+    };
+
+    return 1;
+}
+
+# Thread: pull_global_blocks_thread
+# Purpose: Query central DB for new blocks, push to ips_to_block_queue (adaptive interval)
+sub pull_global_blocks_thread {
+    my ($self) = @_;
+    $self->_log(info => "pull_global_blocks_thread started");
+
+    return unless $self->{central_dbh};  # Skip if no central DB
+
+    my $min_interval = $self->{conf}->{pull_min_interval};
+    my $current_interval = $self->{conf}->{pull_initial_interval};
+    my $max_interval = $self->{conf}->{pull_max_interval};
+    my $step = $self->{conf}->{pull_step_interval};
+    my $last_check_time = time();
+
+    while (!$shutdown) {
+        sleep $current_interval;
+        last if $shutdown;
+
+        my $new_blocks_found = 0;
+
+        # Query central DB for new blocks
+        eval {
+            my $hostname = hostname();
+            my $sth = $self->{central_dbh}->prepare(
+                "SELECT subnet, hostname, service_name, detector_name
+                 FROM active_blocks
+                 WHERE hostname != ?
+                 AND detected_at > TO_TIMESTAMP(?)"
+            );
+            $sth->execute($hostname, $last_check_time);
+
+            while (my $row = $sth->fetchrow_hashref) {
+                $new_blocks_found++;
+
+                # Enqueue for blocking
+                $ips_to_block_queue->enqueue({
+                    ip => $row->{subnet},
+                    source => "central_db:$row->{hostname}",
+                    detector => $row->{detector_name} || 'global_sync',
+                    line => undef,
+                });
+            }
+
+            $last_check_time = time();
+        };
+
+        if ($@) {
+            $self->_log(error => "Failed to pull global blocks: $@");
+            sleep 10;  # Back off on error
+            next;
+        }
+
+        if ($new_blocks_found > 0) {
+            $self->_log(info => "Pulled $new_blocks_found new blocks from central DB");
+        }
+
+        # Adaptive interval adjustment
+        if ($new_blocks_found > 0) {
+            $current_interval -= $step if ($current_interval - $step >= $min_interval);
+            $self->_log(debug => "Pull interval decreased to ${current_interval}s (found new blocks)");
+        } else {
+            $current_interval += $step if ($current_interval + $step <= $max_interval);
+            $self->_log(debug => "Pull interval increased to ${current_interval}s (no new blocks)");
+        }
+    }
+
+    $self->_log(info => "pull_global_blocks_thread shutting down");
+}
+
+# Thread: log_watcher_thread (generic)
+# Purpose: Watch logs (file or journalctl), find bad IPs, push to ips_to_block_queue
+# Note: Phase 10 uses existing _read_all_sources() in main thread for now
+# TODO Phase 10.1: Refactor into per-detector threads with proper file position tracking
+sub log_watcher_thread {
+    my ($self, $detector_name, $detector_config) = @_;
+    $self->_log(info => "log_watcher_thread started for detector: $detector_name");
+
+    # This is a placeholder for future per-detector threading
+    # For Phase 10, we'll continue using the existing _read_all_sources() approach
+    # in the main run_hunter loop, but enqueue to ips_to_block_queue
+
+    $self->_log(warn => "Per-detector log watcher threads not yet implemented in Phase 10");
+    $self->_log(info => "log_watcher_thread shutting down");
+}
+
+# Graceful shutdown handler
+sub _shutdown_gracefully {
+    my ($self, $signal) = @_;
+    $self->_log(info => "Received $signal, initiating graceful shutdown");
+
+    {
+        lock($shutdown);
+        $shutdown = 1;
+        $shutdown_start_time = time();
+    }
+
+    my $timeout = $self->{conf}->{graceful_shutdown_timeout};
+    $self->_log(info => "Allowing ${timeout}s for threads to drain queues");
+
+    # Main thread will handle joining worker threads
+}
+
 sub run_hunter {
     my ($self) = @_;
-    my $hb_at = time() + $self->{conf}->{heartbeat};
+    $self->_log(info => "Phase 10: Starting threaded hunter");
 
+    # Setup signal handlers for graceful shutdown
+    $SIG{QUIT} = sub { $self->_shutdown_gracefully("SIGQUIT"); };
+    $SIG{INT}  = sub { $self->_shutdown_gracefully("SIGINT"); };
+    $SIG{TERM} = sub { $self->_shutdown_gracefully("SIGTERM"); };
+    $SIG{HUP}  = sub { $self->_reload_config_signal(); };
+
+    # Start worker threads
+    $self->_log(info => "Starting worker threads...");
+
+    push @{$self->{threads}}, threads->create(sub { $self->nft_blocker_thread() });
+    push @{$self->{threads}}, threads->create(sub { $self->local_db_recorder_thread() });
+    push @{$self->{threads}}, threads->create(sub { $self->central_db_sync_thread() });
+    push @{$self->{threads}}, threads->create(sub { $self->pull_global_blocks_thread() });
+
+    $self->_log(info => "All worker threads started");
+
+    # Main loop: Read logs and enqueue IPs for blocking
+    my $hb_at = time() + $self->{conf}->{heartbeat};
+    my %new_since_hb;
+
+    # Initial log read
     my $entries = $self->_read_all_sources(
         journal_lookback => $self->{conf}->{initial_journal_lookback},
         max_file_lines   => $self->{conf}->{max_file_tail_lines},
     );
-    for my $unit (keys %$entries) {
-        my $cnt = scalar keys %{$entries->{$unit}};
-        $self->_log(debug => "Source $unit yielded $cnt items with IPv4s");
-    }
-    my %new_since_hb;
 
-    $SIG{QUIT} = sub { $self->_log(info => "SIGQUIT"); exit 0; };
-    $SIG{INT}  = sub { $self->_log(info => "SIGINT");  exit 0; };
-    $SIG{TERM} = sub { $self->_log(info => "SIGTERM"); exit 0; };
-    $SIG{HUP}  = sub { $self->_reload_config_signal(); };
-
-    while (1) {
+    while (!$shutdown) {
         $self->{run_count}++;
 
+        # Process log entries
         my $bad = $self->_bad_entries($entries);
         my $ip_data = $self->_remote_addresses($bad);
-        $ip_data    = $self->_remove_never_block_ips($ip_data);
-        $ip_data    = $self->_remove_already_blocked_ips($ip_data);
 
-        # Track IPs for heartbeat reporting
-        map { $new_since_hb{$_->{ip}} = 1 } @$ip_data if @$ip_data;
+        # Enqueue IPs (nft_blocker_thread will check never_block_cidrs)
+        for my $item (@$ip_data) {
+            $ips_to_block_queue->enqueue({
+                ip => $item->{ip},
+                source => $item->{metadata}->{service} || 'unknown',
+                detector => $item->{metadata}->{detector} || 'unknown',
+                line => $item->{metadata}->{log_line},
+            });
+            $new_since_hb{$item->{ip}} = 1;
+        }
 
-        $self->_add_ips_to_nft($ip_data);
-        $self->_log(debug => "Run #$self->{run_count}: blocked " . scalar(@$ip_data) . " new IPs");
+        $self->_log(debug => "Run #$self->{run_count}: enqueued " . scalar(@$ip_data) . " IPs for blocking");
 
         sleep $self->{conf}->{sleep_time};
         $self->_remove_expired_ips();
 
+        # Heartbeat
         if (time() > $hb_at) {
             $hb_at = time() + $self->{conf}->{heartbeat};
             $self->_reload_blocked_ips();
-            $self->_log(info => "Heartbeat");
+
             my @sorted = sort { $self->{blocked}{$a} <=> $self->{blocked}{$b} } keys %{$self->{blocked}};
-            $self->_log(debug => "Blocked IPs: " . join(", ", @sorted)) if @sorted;
-            $self->_log(info  => "Total blocked IPs: " . scalar(@sorted));
-            $self->_log(info  => "Have ran $self->{run_count} times.");
             my @new_ips = sort { $a cmp $b } keys %new_since_hb;
+
+            $self->_log(info => "Heartbeat: Total blocked IPs: " . scalar(@sorted));
+            $self->_log(info => "Run count: $self->{run_count}");
+            $self->_log(info => "Queue depths: ips_to_block=" . $ips_to_block_queue->pending() .
+                               ", record=" . $record_blocked_ip_queue->pending() .
+                               ", sync=" . $sync_to_central_db_queue->pending());
+
             if (@new_ips) {
-                $self->_log(info => "Newly blocked since last heartbeat: " . join(", ", @new_ips));
+                $self->_log(info => "Newly blocked since last heartbeat (" . scalar(@new_ips) . "): " . join(", ", @new_ips));
             } else {
-                $self->_log(info => "No new IPs since last heartbeat.");
+                $self->_log(info => "No new IPs since last heartbeat");
             }
             %new_since_hb = ();
         }
 
+        # Re-read logs
         $entries = $self->_read_all_sources(
             journal_lookback => $self->{conf}->{initial_journal_lookback},
             max_file_lines   => $self->{conf}->{max_file_tail_lines},
         );
-        for my $unit (keys %$entries) {
-            my $cnt = scalar keys %{$entries->{$unit}};
-            $self->_log(debug => "Source $unit yielded $cnt items with IPv4s");
-        }
     }
+
+    # Shutdown: wait for threads to complete
+    $self->_log(info => "Main loop exiting, waiting for threads to drain queues...");
+    for my $thr (@{$self->{threads}}) {
+        $thr->join();
+    }
+    $self->_log(info => "All threads joined, exiting");
 }
 
 # -------------------- Read All Sources --------------------

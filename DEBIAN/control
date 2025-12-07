@@ -1,20 +1,25 @@
 Package: bad-ips
-Version: 1.1.9
+Version: 1.2.0
 Section: admin
 Priority: optional
 Architecture: all
-Depends: perl, nftables, sqlite3, libconfig-tiny-perl, libdbi-perl, libdbd-sqlite3-perl, libjson-perl, libnet-cidr-perl
+Depends: perl, nftables, sqlite3, libconfig-tiny-perl, libdbi-perl, libdbd-sqlite3-perl, libdbd-pg-perl, libjson-perl, libnet-cidr-perl
 Maintainer: Gardner <gardner@homelab>
-Description: Distributed IP blocking system with hunter-gatherer architecture
+Description: Distributed IP blocking system with hunter-gatherer architecture (Phase 10)
  Bad IPs is a distributed system for blocking malicious IP addresses across
- a homelab infrastructure. It uses nftables for blocking, SQLite for tracking,
- and SSH-based propagation for correlation across multiple servers.
+ a homelab infrastructure. Phase 10 introduces threaded architecture with
+ centralized PostgreSQL database for correlation and reporting.
  .
  Features:
-  - Hunter mode: monitors local logs and blocks locally
+  - Hunter mode: monitors local logs and blocks locally (<1ms blocking)
+  - Multi-threaded async architecture with queue-based pipeline
+  - Centralized PostgreSQL database for cross-server correlation
+  - Local SQLite cache for fast blocking even when central DB is down
   - Gatherer mode: aggregates blocks from all servers and propagates
   - Real-time log monitoring with systemd journal integration
   - Configurable per-service attack pattern detection
   - Never-block CIDR filtering for trusted networks
   - Automatic expiration and cleanup of stale blocks
+  - Adaptive pull interval for efficient central DB queries
+  - Graceful degradation and failover to disk on queue overflow
 Homepage: https://github.com/permittivity2/bad-ips
