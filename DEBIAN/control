@@ -3,7 +3,7 @@ Version: 1.2.0
 Section: admin
 Priority: optional
 Architecture: all
-Depends: perl, nftables, sqlite3, libconfig-tiny-perl, libdbi-perl, libdbd-sqlite3-perl, libdbd-pg-perl, libjson-perl, libnet-cidr-perl
+Depends: perl, nftables, sqlite3, libconfig-tiny-perl, libdbi-perl, libdbd-sqlite3-perl, libdbd-pg-perl, libjson-perl, libnet-cidr-perl, liblog-any-perl, liblog-any-adapter-log4perl-perl, libfile-readbackwards-perl, libregexp-common-perl
 Maintainer: Gardner <gardner@homelab>
 Description: Distributed IP blocking system with hunter-gatherer architecture (Phase 10)
  Bad IPs is a distributed system for blocking malicious IP addresses across
