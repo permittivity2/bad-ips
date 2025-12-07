@@ -214,6 +214,58 @@ sub _init_central_db {
     }
 }
 
+# Helper: Create thread-local database connection
+# Each thread must have its own DBI connection - handles cannot be shared
+sub _create_thread_db_connection {
+    my ($self) = @_;
+
+    my $conf = $self->{conf};
+    return undef unless $conf->{db_host};  # No central DB configured
+
+    # Read password
+    my $pass_file = $conf->{db_pass_file};
+    unless (-f $pass_file) {
+        $self->_log(error => "Password file not found: $pass_file");
+        return undef;
+    }
+
+    open my $fh, '<', $pass_file or do {
+        $self->_log(error => "Cannot read password file $pass_file: $!");
+        return undef;
+    };
+    chomp(my $password = <$fh>);
+    close $fh;
+
+    my $dsn = sprintf(
+        "dbi:Pg:dbname=%s;host=%s;port=%s;sslmode=%s",
+        $conf->{db_name},
+        $conf->{db_host},
+        $conf->{db_port},
+        $conf->{db_ssl_mode}
+    );
+
+    my $dbh;
+    eval {
+        $dbh = DBI->connect(
+            $dsn,
+            $conf->{db_user},
+            $password,
+            {
+                RaiseError => 1,
+                AutoCommit => 1,
+                PrintError => 0,
+            }
+        );
+    };
+
+    if ($@) {
+        $self->_log(error => "Thread DB connection failed: $@");
+        return undef;
+    }
+
+    return $dbh;
+}
+
 sub _load_detectors_from_confdir {
     my ($self) = @_;
     my $dir = $self->{conf_dir};
@@ -748,7 +800,13 @@ sub central_db_sync_thread {
     my ($self) = @_;
     $self->_log(info => "central_db_sync_thread started");
 
-    return unless $self->{central_dbh};  # Skip if no central DB
+    # Create thread-local database connection
+    my $thread_dbh = $self->_create_thread_db_connection();
+    unless ($thread_dbh) {
+        $self->_log(warn => "central_db_sync_thread: no database connection, exiting");
+        return;
+    }
+    $self->_log(info => "central_db_sync_thread: established thread-local DB connection");
 
     my $batch_size = $self->{conf}->{central_db_batch_size};
     my $queue_max = $self->{conf}->{sync_to_central_db_queue_max};
@@ -797,7 +855,7 @@ sub central_db_sync_thread {
         # Batch INSERT to PostgreSQL
         eval {
             for my $item (@batch) {
-                my $sth = $self->{central_dbh}->prepare(
+                my $sth = $thread_dbh->prepare(
                     "SELECT record_blocked_ip(?, ?, ?, NOW() + INTERVAL '? seconds', ?)"
                 );
                 $sth->execute(
@@ -819,6 +877,8 @@ sub central_db_sync_thread {
         }
     }
 
+    # Close thread-local connection
+    $thread_dbh->disconnect() if $thread_dbh;
     $self->_log(info => "central_db_sync_thread shutting down (drained queue)");
 }
 
@@ -854,7 +914,13 @@ sub pull_global_blocks_thread {
     my ($self) = @_;
     $self->_log(info => "pull_global_blocks_thread started");
 
-    return unless $self->{central_dbh};  # Skip if no central DB
+    # Create thread-local database connection
+    my $thread_dbh = $self->_create_thread_db_connection();
+    unless ($thread_dbh) {
+        $self->_log(warn => "pull_global_blocks_thread: no database connection, exiting");
+        return;
+    }
+    $self->_log(info => "pull_global_blocks_thread: established thread-local DB connection");
 
     my $min_interval = $self->{conf}->{pull_min_interval};
     my $current_interval = $self->{conf}->{pull_initial_interval};
@@ -871,7 +937,7 @@ sub pull_global_blocks_thread {
         # Query central DB for new blocks
         eval {
             my $hostname = hostname();
-            my $sth = $self->{central_dbh}->prepare(
+            my $sth = $thread_dbh->prepare(
                 "SELECT subnet, hostname, service_name, detector_name
                  FROM active_blocks
                  WHERE hostname != ?
@@ -914,6 +980,8 @@ sub pull_global_blocks_thread {
         }
     }
 
+    # Close thread-local connection
+    $thread_dbh->disconnect() if $thread_dbh;
     $self->_log(info => "pull_global_blocks_thread shutting down");
 }
 
