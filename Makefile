@@ -47,7 +47,9 @@ deb: clean
 
 	# Copy binaries
 	cp usr/local/sbin/bad_ips $(INSTALL_ROOT)/usr/local/sbin/
+	cp usr/local/sbin/badips-setup-postgresql $(INSTALL_ROOT)/usr/local/sbin/
 	chmod +x $(INSTALL_ROOT)/usr/local/sbin/bad_ips
+	chmod +x $(INSTALL_ROOT)/usr/local/sbin/badips-setup-postgresql
 
 	# Copy Perl module
 	cp usr/local/lib/site_perl/BadIPs.pm $(INSTALL_ROOT)/usr/local/lib/site_perl/
