@@ -77,6 +77,9 @@ deb: clean
 	find $(INSTALL_ROOT) -type f -exec chmod 644 {} \;
 	find $(INSTALL_ROOT) -type d -exec chmod 755 {} \;
 	chmod +x $(INSTALL_ROOT)/usr/local/sbin/bad_ips
+	chmod +x $(INSTALL_ROOT)/usr/local/sbin/badips-setup-postgresql
+	chmod +x $(INSTALL_ROOT)/usr/local/sbin/badips-setup-hunter
+	chmod +x $(INSTALL_ROOT)/usr/local/share/bad_ips/migrate_database_v2.pl
 	chmod +x $(INSTALL_ROOT)/DEBIAN/postinst
 	chmod +x $(INSTALL_ROOT)/DEBIAN/prerm
 	chmod +x $(INSTALL_ROOT)/DEBIAN/postrm
