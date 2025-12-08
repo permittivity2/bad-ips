@@ -40,6 +40,80 @@ LOGOEOF
     echo -e "${NC}"
 }
 
+# Read password with asterisks
+read_password() {
+    local prompt="$1"
+    local password=""
+    local char
+
+    echo -n "$prompt"
+
+    while IFS= read -r -s -n1 char; do
+        if [[ $char == $'\0' ]]; then
+            break
+        elif [[ $char == $'\177' ]] || [[ $char == $'\b' ]]; then
+            if [[ ${#password} -gt 0 ]]; then
+                password="${password%?}"
+                echo -ne '\b \b'
+            fi
+        else
+            password+="$char"
+            echo -n '*'
+        fi
+    done
+    echo
+    echo "$password"
+}
+
+# Check if nftables is available
+check_nftables() {
+    if ! command -v nft &> /dev/null; then
+        echo -e "${RED}Error: nftables (nft) is not installed!${NC}"
+        echo ""
+        echo "Bad IPs requires nftables for firewall management."
+        echo "It cannot work with iptables."
+        echo ""
+        echo "To install nftables:"
+        echo "  sudo apt-get install nftables    # Debian/Ubuntu"
+        echo "  sudo dnf install nftables         # Fedora/RHEL"
+        echo ""
+        return 1
+    fi
+
+    # Check if iptables is active
+    if command -v iptables &> /dev/null && iptables -L -n &> /dev/null; then
+        echo ""
+        echo -e "${YELLOW}Warning: iptables appears to be active on this system.${NC}"
+        echo ""
+        echo "Bad IPs requires nftables and cannot work with iptables."
+        echo ""
+        echo "To migrate from iptables to nftables:"
+        echo "  1. Export your current iptables rules:"
+        echo "     sudo iptables-save > /tmp/iptables-rules.txt"
+        echo ""
+        echo "  2. Convert to nftables format:"
+        echo "     sudo iptables-restore-translate -f /tmp/iptables-rules.txt > /tmp/nftables-rules.nft"
+        echo ""
+        echo "  3. Review and load the nftables rules:"
+        echo "     sudo nft -f /tmp/nftables-rules.nft"
+        echo ""
+        echo "  4. Disable iptables and enable nftables:"
+        echo "     sudo systemctl disable iptables"
+        echo "     sudo systemctl enable nftables"
+        echo ""
+        echo "  5. Reboot to ensure clean firewall state"
+        echo ""
+        echo "For more information: https://wiki.nftables.org/wiki-nftables/index.php/Moving_from_iptables_to_nftables"
+        echo ""
+        read -p "Do you want to continue anyway? [y/N]: " CONTINUE
+        if [[ ! "$CONTINUE" =~ ^[Yy]$ ]]; then
+            exit 1
+        fi
+    fi
+
+    return 0
+}
+
 # Check if running as root
 check_root() {
     if [[ $EUID -ne 0 ]]; then
@@ -255,8 +329,7 @@ configure_database() {
             # Try to connect
             echo ""
             echo "Testing connection to existing database..."
-            read -s -p "Enter password for user '$DB_USER': " DB_PASSWORD
-            echo ""
+            DB_PASSWORD=$(read_password "Enter password for user '$DB_USER': ")
             
             if test_pg_connection "localhost" "$DB_PORT" "$DB_NAME" "$DB_USER" "$DB_PASSWORD"; then
                 echo -e "${GREEN}✓${NC} Connection successful!"
@@ -285,9 +358,8 @@ configure_database() {
                         echo "Please provide PostgreSQL admin credentials to setup the database."
                         read -p "Admin username [postgres]: " ADMIN_USER
                         ADMIN_USER=${ADMIN_USER:-postgres}
-                        
-                        read -s -p "Admin password: " ADMIN_PASSWORD
-                        echo ""
+
+                        ADMIN_PASSWORD=$(read_password "Admin password: ")
                         
                         # Generate new password for bad_ips user
                         DB_PASSWORD=$(generate_password)
@@ -330,9 +402,8 @@ configure_database() {
         read -p "Database username [bad_ips]: " DB_USER
         DB_USER=${DB_USER:-bad_ips}
         
-        read -s -p "Database password: " DB_PASSWORD
-        echo ""
-        
+        DB_PASSWORD=$(read_password "Database password: ")
+
         echo ""
         echo "Testing connection..."
         if test_pg_connection "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$DB_PASSWORD"; then
@@ -343,9 +414,31 @@ configure_database() {
             
             if [[ "$TABLE_COUNT" == "0" ]]; then
                 echo ""
-                echo -e "${YELLOW}Warning: Tables do not exist in the database.${NC}"
-                echo "Please create tables manually using the schema in the documentation,"
-                echo "or ensure the database user has CREATE TABLE privileges."
+                echo -e "${YELLOW}Warning: Required tables do not exist in the database.${NC}"
+                echo ""
+                echo "The 'jailed_ips' table needs to be created. You can create it with:"
+                echo ""
+                echo "  PGPASSWORD='yourpassword' psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME <<'SQL'"
+                echo "  CREATE TABLE IF NOT EXISTS jailed_ips ("
+                echo "      id SERIAL PRIMARY KEY,"
+                echo "      ip VARCHAR(45) NOT NULL,"
+                echo "      originating_server VARCHAR(255) NOT NULL,"
+                echo "      originating_service VARCHAR(255),"
+                echo "      detector_name VARCHAR(255),"
+                echo "      pattern_matched TEXT,"
+                echo "      matched_log_line TEXT,"
+                echo "      first_blocked_at BIGINT NOT NULL,"
+                echo "      last_seen_at BIGINT NOT NULL,"
+                echo "      expires_at BIGINT NOT NULL,"
+                echo "      block_count INTEGER DEFAULT 1,"
+                echo "      UNIQUE(ip, originating_server)"
+                echo "  );"
+                echo "  CREATE INDEX IF NOT EXISTS idx_jailed_ips_expires ON jailed_ips(expires_at);"
+                echo "  CREATE INDEX IF NOT EXISTS idx_jailed_ips_ip ON jailed_ips(ip);"
+                echo "  SQL"
+                echo ""
+                echo "Note: This schema is for PostgreSQL. It may need modifications for other databases."
+                echo "Ensure your database user has CREATE TABLE privileges."
             fi
         else
             echo -e "${RED}✗${NC} Connection failed!"
@@ -588,7 +681,8 @@ main() {
     
     check_root
     detect_os
-    
+    check_nftables
+
     echo ""
     add_gpg_key
     add_repository
