@@ -147,7 +147,7 @@ sub _load_config {
     $self->{conf}->{db_port}                                //= 5432;
     $self->{conf}->{db_name}                                //= 'bad_ips';
     $self->{conf}->{db_user}                                //= 'bad_ips_hunter';
-    $self->{conf}->{db_pass_file}                           //= '/etc/bad_ips/db_password';
+    $self->{conf}->{db_password}                            //= '';
     $self->{conf}->{db_ssl_mode}                            //= 'disable';
 }
 
@@ -170,20 +170,12 @@ sub _init_central_db {
 
     my $conf = $self->{conf};
 
-    # Read password from file
-    my $pass_file = $conf->{db_pass_file};
-    if (!-f $pass_file) {
-        $self->_log(warn => "PostgreSQL password file not found: $pass_file");
+    # Check if database is configured
+    unless ($conf->{db_host} && $conf->{db_password}) {
+        $self->_log(warn => "PostgreSQL not configured (missing db_host or db_password)");
         $self->_log(warn => "Central DB sync will be disabled");
         return;
     }
-
-    open my $fh, '<', $pass_file or do {
-        $self->_log(error => "Cannot read password file $pass_file: $!");
-        return;
-    };
-    chomp(my $password = <$fh>);
-    close $fh;
 
     my $dsn = sprintf(
         "dbi:Pg:dbname=%s;host=%s;port=%s;sslmode=%s",
@@ -197,7 +189,7 @@ sub _init_central_db {
         $self->{central_dbh} = DBI->connect(
             $dsn,
             $conf->{db_user},
-            $password,
+            $conf->{db_password},
             {
                 RaiseError => 1,
                 AutoCommit => 1,
@@ -220,21 +212,9 @@ sub _create_thread_db_connection {
     my ($self) = @_;
 
     my $conf = $self->{conf};
-    return undef unless $conf->{db_host};  # No central DB configured
 
-    # Read password
-    my $pass_file = $conf->{db_pass_file};
-    unless (-f $pass_file) {
-        $self->_log(error => "Password file not found: $pass_file");
-        return undef;
-    }
-
-    open my $fh, '<', $pass_file or do {
-        $self->_log(error => "Cannot read password file $pass_file: $!");
-        return undef;
-    };
-    chomp(my $password = <$fh>);
-    close $fh;
+    # Check if database is configured
+    return undef unless $conf->{db_host} && $conf->{db_password};
 
     my $dsn = sprintf(
         "dbi:Pg:dbname=%s;host=%s;port=%s;sslmode=%s",
@@ -249,7 +229,7 @@ sub _create_thread_db_connection {
         $dbh = DBI->connect(
             $dsn,
             $conf->{db_user},
-            $password,
+            $conf->{db_password},
             {
                 RaiseError => 1,
                 AutoCommit => 1,
