@@ -1,0 +1,607 @@
+#!/bin/bash
+# Bad IPs Installation Script v2.0
+# One-line install: curl -fsSL https://projects.thedude.vip/bad-ips/install.sh | sudo bash
+
+set -e
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+# Repository configuration
+REPO_URL="https://projects.thedude.vip/apt"
+GPG_KEY_URL="https://projects.thedude.vip/apt/silver-linings.gpg.key"
+
+# Configuration paths
+CONFIG_DIR="/usr/local/etc"
+BADIPS_CONF="$CONFIG_DIR/badips.conf"
+DB_CONF="$CONFIG_DIR/badips.d/database.conf"
+
+# Print logo
+print_logo() {
+    echo -e "${CYAN}"
+    cat << 'LOGOEOF'
+    ____            __   ____  ____
+   / __ )____ _____/ /  /  _/ / __ \____
+  / __  / __ `/ __  /   / /  / /_/ / ___/
+ / /_/ / /_/ / /_/ /  _/ /  / ____(__  )
+/_____/\__,_/\__,_/  /___/ /_/    /____/
+
+  Distributed IP Blocking System
+  Silver Linings, LLC
+LOGOEOF
+    echo -e "${NC}"
+}
+
+# Check if running as root
+check_root() {
+    if [[ $EUID -ne 0 ]]; then
+        echo -e "${RED}Error: This script must be run as root${NC}"
+        echo "Usage: curl -fsSL https://projects.thedude.vip/bad-ips/install.sh | sudo bash"
+        exit 1
+    fi
+}
+
+# Detect OS
+detect_os() {
+    if [[ -f /etc/os-release ]]; then
+        . /etc/os-release
+        OS=$ID
+        VER=$VERSION_ID
+        echo -e "${GREEN}✓${NC} Detected: $OS $VER"
+    else
+        echo -e "${RED}Error: Cannot detect OS${NC}"
+        exit 1
+    fi
+
+    if [[ "$OS" != "ubuntu" ]] && [[ "$OS" != "debian" ]]; then
+        echo -e "${RED}Error: Only Ubuntu and Debian are currently supported${NC}"
+        exit 1
+    fi
+}
+
+# Add GPG key
+add_gpg_key() {
+    echo ""
+    echo -e "${BLUE}Adding Silver Linings, LLC GPG key...${NC}"
+    
+    mkdir -p /etc/apt/keyrings
+    rm -f /etc/apt/keyrings/silver-linings.gpg
+    curl -fsSL "$GPG_KEY_URL" | gpg --batch --no-tty --dearmor -o /etc/apt/keyrings/silver-linings.gpg
+    
+    echo -e "${GREEN}✓${NC} GPG key added"
+}
+
+# Add repository
+add_repository() {
+    echo -e "${BLUE}Adding Bad IPs apt repository...${NC}"
+    
+    echo "deb [signed-by=/etc/apt/keyrings/silver-linings.gpg] $REPO_URL ./" > /etc/apt/sources.list.d/bad-ips.list
+    
+    echo -e "${GREEN}✓${NC} Repository added"
+}
+
+# Update apt
+update_apt() {
+    echo -e "${BLUE}Updating apt cache...${NC}"
+    apt-get update > /dev/null 2>&1
+    echo -e "${GREEN}✓${NC} Apt cache updated"
+}
+
+# Install Bad IPs package
+install_badips() {
+    echo -e "${BLUE}Installing Bad IPs package...${NC}"
+    DEBIAN_FRONTEND=noninteractive apt-get install -y bad-ips > /dev/null 2>&1
+    echo -e "${GREEN}✓${NC} Bad IPs installed"
+}
+
+# Generate random password
+generate_password() {
+    tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 16
+}
+
+# Test PostgreSQL connection
+test_pg_connection() {
+    local host=$1
+    local port=$2
+    local dbname=$3
+    local user=$4
+    local password=$5
+    
+    PGPASSWORD="$password" psql -h "$host" -p "$port" -U "$user" -d "$dbname" -c "SELECT 1" > /dev/null 2>&1
+    return $?
+}
+
+# Check if PostgreSQL is installed
+is_postgresql_installed() {
+    dpkg -l | grep -q "^ii.*postgresql-[0-9]" 2>/dev/null
+}
+
+# Install and setup PostgreSQL
+install_postgresql() {
+    echo ""
+    echo -e "${BLUE}Installing PostgreSQL...${NC}"
+    DEBIAN_FRONTEND=noninteractive apt-get install -y postgresql postgresql-contrib > /dev/null 2>&1
+    
+    # Start PostgreSQL
+    systemctl start postgresql
+    systemctl enable postgresql > /dev/null 2>&1
+    
+    echo -e "${GREEN}✓${NC} PostgreSQL installed and started"
+}
+
+# Setup PostgreSQL database and user
+setup_postgresql_database() {
+    local db_user=$1
+    local db_password=$2
+    local db_name="bad_ips"
+    
+    echo ""
+    echo -e "${BLUE}Setting up PostgreSQL database...${NC}"
+    
+    # Create user and database as postgres user
+    sudo -u postgres psql > /dev/null 2>&1 <<SQLEOF
+-- Create user if not exists
+DO \$\$
+BEGIN
+    IF NOT EXISTS (SELECT FROM pg_user WHERE usename = '$db_user') THEN
+        CREATE USER $db_user WITH PASSWORD '$db_password';
+    END IF;
+END
+\$\$;
+
+-- Create database if not exists
+SELECT 'CREATE DATABASE $db_name OWNER $db_user'
+WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '$db_name')\gexec
+
+-- Grant privileges
+GRANT ALL PRIVILEGES ON DATABASE $db_name TO $db_user;
+SQLEOF
+    
+    # Create tables
+    PGPASSWORD="$db_password" psql -h localhost -U "$db_user" -d "$db_name" > /dev/null 2>&1 <<'CREATETABLES'
+-- Create jailed_ips table
+CREATE TABLE IF NOT EXISTS jailed_ips (
+    id SERIAL PRIMARY KEY,
+    ip VARCHAR(45) NOT NULL,
+    originating_server VARCHAR(255) NOT NULL,
+    originating_service VARCHAR(255),
+    detector_name VARCHAR(255),
+    pattern_matched TEXT,
+    matched_log_line TEXT,
+    first_blocked_at BIGINT NOT NULL,
+    last_seen_at BIGINT NOT NULL,
+    expires_at BIGINT NOT NULL,
+    block_count INTEGER DEFAULT 1,
+    UNIQUE(ip, originating_server)
+);
+
+-- Create index for faster queries
+CREATE INDEX IF NOT EXISTS idx_jailed_ips_expires ON jailed_ips(expires_at);
+CREATE INDEX IF NOT EXISTS idx_jailed_ips_ip ON jailed_ips(ip);
+CREATETABLES
+    
+    echo -e "${GREEN}✓${NC} Database and tables created"
+}
+
+# Database configuration wizard
+configure_database() {
+    echo ""
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${YELLOW}  DATABASE CONFIGURATION${NC}"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo "Bad IPs requires a PostgreSQL database for storing block information."
+    echo ""
+    
+    # Ask for database host
+    read -p "Database hostname or IP address [localhost]: " DB_HOST
+    DB_HOST=${DB_HOST:-localhost}
+    
+    # Check if localhost
+    if [[ "$DB_HOST" == "localhost" ]] || [[ "$DB_HOST" == "127.0.0.1" ]]; then
+        # Localhost scenario
+        if ! is_postgresql_installed; then
+            # PostgreSQL not installed
+            echo ""
+            echo "PostgreSQL is not installed on this system."
+            echo ""
+            read -p "Would you like to install PostgreSQL now? [Y/n]: " INSTALL_PG
+            
+            if [[ ! "$INSTALL_PG" =~ ^[Nn]$ ]]; then
+                install_postgresql
+                
+                # Get database credentials
+                read -p "Database username [bad_ips]: " DB_USER
+                DB_USER=${DB_USER:-bad_ips}
+                
+                echo ""
+                echo "A random password will be generated for the database user."
+                DB_PASSWORD=$(generate_password)
+                echo -e "${GREEN}Generated password: ${CYAN}$DB_PASSWORD${NC}"
+                echo ""
+                
+                # Setup database
+                setup_postgresql_database "$DB_USER" "$DB_PASSWORD"
+                
+                DB_PORT=5432
+                DB_NAME="bad_ips"
+            else
+                echo ""
+                echo -e "${YELLOW}Installation cancelled. Please install PostgreSQL manually and re-run this installer.${NC}"
+                exit 0
+            fi
+        else
+            # PostgreSQL is installed
+            echo ""
+            echo "PostgreSQL is already installed."
+            echo ""
+            
+            read -p "Database username [bad_ips]: " DB_USER
+            DB_USER=${DB_USER:-bad_ips}
+            
+            read -p "Database port [5432]: " DB_PORT
+            DB_PORT=${DB_PORT:-5432}
+            
+            DB_NAME="bad_ips"
+            
+            # Try to connect
+            echo ""
+            echo "Testing connection to existing database..."
+            read -s -p "Enter password for user '$DB_USER': " DB_PASSWORD
+            echo ""
+            
+            if test_pg_connection "localhost" "$DB_PORT" "$DB_NAME" "$DB_USER" "$DB_PASSWORD"; then
+                echo -e "${GREEN}✓${NC} Connection successful!"
+                
+                # Check if tables exist
+                TABLE_COUNT=$(PGPASSWORD="$DB_PASSWORD" psql -h localhost -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -t -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'jailed_ips'" 2>/dev/null | tr -d ' ')
+                
+                if [[ "$TABLE_COUNT" == "0" ]]; then
+                    echo ""
+                    echo "Database exists but tables are missing. Creating tables..."
+                    setup_postgresql_database "$DB_USER" "$DB_PASSWORD"
+                fi
+            else
+                echo -e "${RED}✗${NC} Connection failed!"
+                echo ""
+                echo "Would you like to:"
+                echo "  [1] Try different credentials"
+                echo "  [2] Setup database with admin credentials"
+                echo "  [3] Exit and configure manually"
+                echo ""
+                read -p "Select option [1-3]: " CONN_OPTION
+                
+                case $CONN_OPTION in
+                    2)
+                        echo ""
+                        echo "Please provide PostgreSQL admin credentials to setup the database."
+                        read -p "Admin username [postgres]: " ADMIN_USER
+                        ADMIN_USER=${ADMIN_USER:-postgres}
+                        
+                        read -s -p "Admin password: " ADMIN_PASSWORD
+                        echo ""
+                        
+                        # Generate new password for bad_ips user
+                        DB_PASSWORD=$(generate_password)
+                        echo ""
+                        echo -e "${GREEN}Generated password for '$DB_USER': ${CYAN}$DB_PASSWORD${NC}"
+                        echo ""
+                        
+                        setup_postgresql_database "$DB_USER" "$DB_PASSWORD"
+                        ;;
+                    3)
+                        echo ""
+                        echo -e "${YELLOW}Installation cancelled.${NC}"
+                        echo ""
+                        echo "To configure manually:"
+                        echo "  1. Create database and user in PostgreSQL"
+                        echo "  2. Edit $DB_CONF with connection details"
+                        echo "  3. Run: systemctl start bad_ips"
+                        exit 0
+                        ;;
+                    *)
+                        echo ""
+                        echo "Please try running the installer again with correct credentials."
+                        exit 1
+                        ;;
+                esac
+            fi
+        fi
+    else
+        # Remote database scenario
+        echo ""
+        echo "Configuring remote PostgreSQL database..."
+        echo ""
+        
+        read -p "Database port [5432]: " DB_PORT
+        DB_PORT=${DB_PORT:-5432}
+        
+        read -p "Database name [bad_ips]: " DB_NAME
+        DB_NAME=${DB_NAME:-bad_ips}
+        
+        read -p "Database username [bad_ips]: " DB_USER
+        DB_USER=${DB_USER:-bad_ips}
+        
+        read -s -p "Database password: " DB_PASSWORD
+        echo ""
+        
+        echo ""
+        echo "Testing connection..."
+        if test_pg_connection "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$DB_PASSWORD"; then
+            echo -e "${GREEN}✓${NC} Connection successful!"
+            
+            # Check if tables exist
+            TABLE_COUNT=$(PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -t -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'jailed_ips'" 2>/dev/null | tr -d ' ')
+            
+            if [[ "$TABLE_COUNT" == "0" ]]; then
+                echo ""
+                echo -e "${YELLOW}Warning: Tables do not exist in the database.${NC}"
+                echo "Please create tables manually using the schema in the documentation,"
+                echo "or ensure the database user has CREATE TABLE privileges."
+            fi
+        else
+            echo -e "${RED}✗${NC} Connection failed!"
+            echo ""
+            echo "Please verify:"
+            echo "  - Database host is reachable"
+            echo "  - PostgreSQL is running on $DB_HOST:$DB_PORT"
+            echo "  - Username and password are correct"
+            echo "  - Database '$DB_NAME' exists"
+            echo "  - PostgreSQL allows connections from this host"
+            echo ""
+            read -p "Continue anyway? [y/N]: " CONTINUE
+            if [[ ! "$CONTINUE" =~ ^[Yy]$ ]]; then
+                exit 1
+            fi
+        fi
+    fi
+    
+    # Save database configuration
+    echo ""
+    echo -e "${BLUE}Saving database configuration...${NC}"
+    mkdir -p "$(dirname "$DB_CONF")"
+    cat > "$DB_CONF" <<DBCONFEOF
+# Bad IPs Database Configuration
+# This file is automatically generated during installation
+# Modify with caution - incorrect settings will prevent Bad IPs from starting
+
+db_host = $DB_HOST
+db_port = $DB_PORT
+db_name = $DB_NAME
+db_user = $DB_USER
+db_password = $DB_PASSWORD
+db_ssl_mode = disable
+DBCONFEOF
+    
+    chmod 600 "$DB_CONF"
+    echo -e "${GREEN}✓${NC} Database configuration saved to $DB_CONF"
+}
+
+# Detect running services
+detect_services() {
+    local detected=()
+    
+    # Check for common services
+    systemctl is-active --quiet postfix.service 2>/dev/null && detected+=("postfix")
+    systemctl is-active --quiet dovecot.service 2>/dev/null && detected+=("dovecot")
+    systemctl is-active --quiet nginx.service 2>/dev/null && detected+=("nginx")
+    systemctl is-active --quiet apache2.service 2>/dev/null && detected+=("apache2")
+    systemctl is-active --quiet named.service 2>/dev/null && detected+=("named")
+    systemctl is-active --quiet bind9.service 2>/dev/null && detected+=("named")
+    systemctl is-active --quiet ssh.service 2>/dev/null && detected+=("ssh")
+    systemctl is-active --quiet sshd.service 2>/dev/null && detected+=("ssh")
+    
+    echo "${detected[@]}"
+}
+
+# Configure service monitoring
+configure_services() {
+    echo ""
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${YELLOW}  SERVICE MONITORING${NC}"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    
+    local detected_services=($(detect_services))
+    
+    if [[ ${#detected_services[@]} -eq 0 ]]; then
+        echo "No monitorable services detected."
+        echo ""
+        echo "Available detectors:"
+        echo "  - postfix - mail server"
+        echo "  - dovecot - IMAP/POP3"
+        echo "  - nginx - web server"
+        echo "  - apache2 - web server"
+        echo "  - named - DNS server"
+        echo "  - ssh - SSH server"
+        echo ""
+        echo "You can manually enable detectors later in $CONFIG_DIR/badips.d/"
+        return
+    fi
+    
+    echo "Detected running services:"
+    for svc in "${detected_services[@]}"; do
+        echo -e "  ${GREEN}✓${NC} $svc"
+    done
+    echo ""
+    
+    echo "These services will be monitored for malicious activity."
+    echo "Detectors can be configured in: $CONFIG_DIR/badips.d/"
+    echo ""
+    
+    # All detected services are automatically monitored via the detector config files
+    # No additional configuration needed - they're already in /usr/local/etc/badips.d/
+}
+
+# Configure never_block_cidrs
+configure_never_block() {
+    echo ""
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${YELLOW}  TRUSTED NETWORKS - CRITICAL${NC}"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo "Configure networks that should NEVER be blocked."
+    echo "This prevents accidentally locking yourself out!"
+    echo ""
+    
+    # Default safe CIDRs (RFC1918 + localhost + other non-routable)
+    DEFAULT_CIDRS="10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,169.254.0.0/16,224.0.0.0/4,240.0.0.0/4"
+    
+    echo "Default trusted networks (RFC1918 + non-routable):"
+    echo "$DEFAULT_CIDRS" | tr ',' '\n' | sed 's/^/  /'
+    echo ""
+    
+    # Try to detect current SSH connection IP
+    if [[ -n "$SSH_CLIENT" ]]; then
+        SSH_IP=$(echo "$SSH_CLIENT" | awk '{print $1}')
+        echo -e "${CYAN}Note: You are connected via SSH from: $SSH_IP${NC}"
+        echo "Consider adding this IP to trusted networks!"
+        echo ""
+    fi
+    
+    read -p "Enter comma-separated CIDRs to trust [$DEFAULT_CIDRS]: " USER_CIDRS
+    NEVER_BLOCK_CIDRS=${USER_CIDRS:-$DEFAULT_CIDRS}
+    
+    echo ""
+    echo "Trusted networks configured:"
+    echo "$NEVER_BLOCK_CIDRS" | tr ',' '\n' | sed 's/^/  /'
+}
+
+# Setup nftables
+setup_nftables() {
+    echo ""
+    echo -e "${BLUE}Setting up nftables firewall rules...${NC}"
+    
+    # Create table and chain if they don't exist
+    nft add table inet filter 2>/dev/null || true
+    nft add chain inet filter input '{ type filter hook input priority 0 ; }' 2>/dev/null || true
+    
+    # Create badipv4 set
+    nft add set inet filter badipv4 '{ type ipv4_addr; flags timeout; }' 2>/dev/null || true
+    
+    # Add drop rule if it doesn't exist
+    nft list chain inet filter input | grep -q "ip saddr @badipv4 drop" || \
+        nft add rule inet filter input ip saddr @badipv4 drop
+    
+    # Make nftables persistent
+    mkdir -p /etc/nftables.d
+    nft list ruleset > /etc/nftables.d/bad_ips.nft
+    
+    # Add include to main nftables config if not already there
+    if [[ -f /etc/nftables.conf ]]; then
+        grep -q "include \"/etc/nftables.d/bad_ips.nft\"" /etc/nftables.conf || \
+            echo 'include "/etc/nftables.d/bad_ips.nft"' >> /etc/nftables.conf
+    fi
+    
+    systemctl enable nftables 2>/dev/null || true
+    
+    echo -e "${GREEN}✓${NC} nftables configured"
+}
+
+# Generate main badips.conf
+generate_config() {
+    echo ""
+    echo -e "${BLUE}Generating main configuration...${NC}"
+    
+    cat > "$BADIPS_CONF" <<CONFEOF
+# Bad IPs Configuration
+# Generated during installation on $(date)
+
+[global]
+# Logging
+log_level = info
+
+# How long to block an IP (seconds)
+block_duration = 691200  # 8 days
+
+# Network filtering
+never_block_cidrs = $NEVER_BLOCK_CIDRS
+
+# Performance tuning
+auto_mode = 1
+
+# Cleanup intervals
+cleanup_every_seconds = 3600
+CONFEOF
+    
+    echo -e "${GREEN}✓${NC} Configuration saved to $BADIPS_CONF"
+}
+
+# Enable and start service
+enable_service() {
+    echo ""
+    echo -e "${BLUE}Enabling and starting bad_ips service...${NC}"
+    
+    systemctl daemon-reload
+    systemctl enable bad_ips.service > /dev/null 2>&1
+    systemctl start bad_ips.service
+    
+    sleep 2
+    
+    if systemctl is-active --quiet bad_ips.service; then
+        echo -e "${GREEN}✓${NC} Service is running"
+    else
+        echo -e "${YELLOW}⚠${NC} Service failed to start"
+        echo ""
+        echo "Check logs with: journalctl -u bad_ips.service -n 50"
+    fi
+}
+
+# Show final status
+show_status() {
+    echo ""
+    echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${GREEN}  INSTALLATION COMPLETE${NC}"
+    echo -e "${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo "Bad IPs is now monitoring your system and blocking malicious IPs."
+    echo ""
+    echo "Configuration:"
+    echo "  Main config:     $BADIPS_CONF"
+    echo "  Database config: $DB_CONF"
+    echo "  Detectors:       $CONFIG_DIR/badips.d/"
+    echo ""
+    echo "Useful commands:"
+    echo "  Status:      systemctl status bad_ips.service"
+    echo "  Logs:        journalctl -u bad_ips.service -f"
+    echo "  Blocked IPs: sudo nft list set inet filter badipv4"
+    echo ""
+    echo "Documentation: https://projects.thedude.vip/bad-ips/"
+    echo "Support:       https://github.com/permittivity2/bad-ips/issues"
+    echo ""
+}
+
+# Main installation flow
+main() {
+    print_logo
+    
+    echo -e "${BLUE}Bad IPs Installation v2.0${NC}"
+    echo ""
+    
+    check_root
+    detect_os
+    
+    echo ""
+    add_gpg_key
+    add_repository
+    update_apt
+    install_badips
+    
+    configure_database
+    configure_services
+    configure_never_block
+    
+    generate_config
+    setup_nftables
+    enable_service
+    
+    show_status
+}
+
+# Run main
+main
