@@ -46,22 +46,22 @@ read_password() {
     local password=""
     local char
 
-    echo -n "$prompt"
+    echo -n "$prompt" >&2
 
-    while IFS= read -r -s -n1 char; do
+    while IFS= read -r -s -n1 char < /dev/tty; do
         if [[ $char == $'\0' ]]; then
             break
         elif [[ $char == $'\177' ]] || [[ $char == $'\b' ]]; then
             if [[ ${#password} -gt 0 ]]; then
                 password="${password%?}"
-                echo -ne '\b \b'
+                echo -ne '\b \b' >&2
             fi
         else
             password+="$char"
-            echo -n '*'
+            echo -n '*' >&2
         fi
     done
-    echo
+    echo >&2
     echo "$password"
 }
 
