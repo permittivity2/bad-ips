@@ -416,29 +416,61 @@ configure_database() {
                 echo ""
                 echo -e "${YELLOW}Warning: Required tables do not exist in the database.${NC}"
                 echo ""
-                echo "The 'jailed_ips' table needs to be created. You can create it with:"
-                echo ""
-                echo "  PGPASSWORD='yourpassword' psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME <<'SQL'"
-                echo "  CREATE TABLE IF NOT EXISTS jailed_ips ("
-                echo "      id SERIAL PRIMARY KEY,"
-                echo "      ip VARCHAR(45) NOT NULL,"
-                echo "      originating_server VARCHAR(255) NOT NULL,"
-                echo "      originating_service VARCHAR(255),"
-                echo "      detector_name VARCHAR(255),"
-                echo "      pattern_matched TEXT,"
-                echo "      matched_log_line TEXT,"
-                echo "      first_blocked_at BIGINT NOT NULL,"
-                echo "      last_seen_at BIGINT NOT NULL,"
-                echo "      expires_at BIGINT NOT NULL,"
-                echo "      block_count INTEGER DEFAULT 1,"
-                echo "      UNIQUE(ip, originating_server)"
-                echo "  );"
-                echo "  CREATE INDEX IF NOT EXISTS idx_jailed_ips_expires ON jailed_ips(expires_at);"
-                echo "  CREATE INDEX IF NOT EXISTS idx_jailed_ips_ip ON jailed_ips(ip);"
-                echo "  SQL"
-                echo ""
-                echo "Note: This schema is for PostgreSQL. It may need modifications for other databases."
-                echo "Ensure your database user has CREATE TABLE privileges."
+                read -p "Would you like to create the tables automatically? [Y/n]: " CREATE_TABLES
+                if [[ "$CREATE_TABLES" =~ ^[Nn]$ ]]; then
+                    echo ""
+                    echo "The 'jailed_ips' table needs to be created. You can create it with:"
+                    echo ""
+                    echo "  PGPASSWORD='yourpassword' psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME <<'SQL'"
+                    echo "  CREATE TABLE IF NOT EXISTS jailed_ips ("
+                    echo "      id SERIAL PRIMARY KEY,"
+                    echo "      ip VARCHAR(45) NOT NULL,"
+                    echo "      originating_server VARCHAR(255) NOT NULL,"
+                    echo "      originating_service VARCHAR(255),"
+                    echo "      detector_name VARCHAR(255),"
+                    echo "      pattern_matched TEXT,"
+                    echo "      matched_log_line TEXT,"
+                    echo "      first_blocked_at BIGINT NOT NULL,"
+                    echo "      last_seen_at BIGINT NOT NULL,"
+                    echo "      expires_at BIGINT NOT NULL,"
+                    echo "      block_count INTEGER DEFAULT 1,"
+                    echo "      UNIQUE(ip, originating_server)"
+                    echo "  );"
+                    echo "  CREATE INDEX IF NOT EXISTS idx_jailed_ips_expires ON jailed_ips(expires_at);"
+                    echo "  CREATE INDEX IF NOT EXISTS idx_jailed_ips_ip ON jailed_ips(ip);"
+                    echo "  SQL"
+                    echo ""
+                    echo "Note: This schema is for PostgreSQL. It may need modifications for other databases."
+                else
+                    echo ""
+                    echo "Creating tables..."
+                    if PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" <<'SQL' 2>&1
+CREATE TABLE IF NOT EXISTS jailed_ips (
+    id SERIAL PRIMARY KEY,
+    ip VARCHAR(45) NOT NULL,
+    originating_server VARCHAR(255) NOT NULL,
+    originating_service VARCHAR(255),
+    detector_name VARCHAR(255),
+    pattern_matched TEXT,
+    matched_log_line TEXT,
+    first_blocked_at BIGINT NOT NULL,
+    last_seen_at BIGINT NOT NULL,
+    expires_at BIGINT NOT NULL,
+    block_count INTEGER DEFAULT 1,
+    UNIQUE(ip, originating_server)
+);
+CREATE INDEX IF NOT EXISTS idx_jailed_ips_expires ON jailed_ips(expires_at);
+CREATE INDEX IF NOT EXISTS idx_jailed_ips_ip ON jailed_ips(ip);
+SQL
+                    then
+                        echo -e "${GREEN}✓${NC} Tables created successfully!"
+                    else
+                        echo -e "${RED}✗${NC} Failed to create tables."
+                        echo ""
+                        echo "Please ensure your database user has CREATE TABLE privileges."
+                        echo "You may need to create the tables manually."
+                    fi
+                fi
             fi
         else
             echo -e "${RED}✗${NC} Connection failed!"
