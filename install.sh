@@ -1,8 +1,11 @@
 #!/bin/bash
 # Bad IPs Installation Script v2.0
-# One-line install: curl -fsSL https://projects.thedude.vip/bad-ips/install.sh | sudo bash
+# One-line install: bash <(curl -fsSL https://projects.thedude.vip/bad-ips/install.sh)
 
 set -e
+
+# Fix stdin for interactive prompts when piped through curl
+exec < /dev/tty || true
 
 # Colors
 RED='\033[0;31m'
