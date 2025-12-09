@@ -645,6 +645,65 @@ sub _db_upsert_blocked_ip {
     }
 }
 
+# Thread-safe versions that accept a database handle parameter
+sub _db_upsert_jailed_ip_with_handle {
+    my ($self, $dbh, $ip, $expires_epoch) = @_;
+    my $now = int(time());
+
+    my $sql = q{
+        INSERT INTO jailed_ips (ip, first_blocked_at, last_seen_at, expires_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(ip) DO UPDATE SET
+            last_seen_at = excluded.last_seen_at,
+            expires_at = excluded.expires_at
+    };
+
+    my $sth = $dbh->prepare($sql);
+    $sth->execute($ip, $now, $now, int($expires_epoch));
+}
+
+sub _db_upsert_blocked_ip_with_handle {
+    my ($self, $dbh, $ip, $expires_epoch, $metadata) = @_;
+    my $now = int(time());
+    my $hostname = $self->{conf}->{hostname} || `hostname -s`;
+    chomp $hostname;
+
+    # Extract metadata with defaults
+    my $service = $metadata->{service} || 'unknown';
+    my $detector = $metadata->{detector} || 'unknown';
+    my $pattern = $metadata->{pattern} || 'unknown';
+    my $log_line = $metadata->{log_line} || '';
+
+    # Truncate log line to 500 chars
+    $log_line = substr($log_line, 0, 500) if length($log_line) > 500;
+
+    # UPSERT into blocked_ips table
+    my $sql = q{
+        INSERT INTO blocked_ips (
+            ip, originating_server, originating_service, detector_name,
+            pattern_matched, matched_log_line,
+            first_blocked_at, last_seen_at, expires_at, block_count
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+        ON CONFLICT(ip, originating_server) DO UPDATE SET
+            last_seen_at = excluded.last_seen_at,
+            expires_at = excluded.expires_at,
+            block_count = blocked_ips.block_count + 1,
+            pattern_matched = excluded.pattern_matched,
+            matched_log_line = excluded.matched_log_line
+    };
+
+    eval {
+        $dbh->do($sql, undef,
+            $ip, $hostname, $service, $detector,
+            $pattern, $log_line,
+            $now, $now, int($expires_epoch)
+        );
+    };
+    if ($@) {
+        $self->_log(error => "Failed to insert into blocked_ips for $ip: $@");
+    }
+}
+
 # -------------------- main loop --------------------
 sub run {
     my ($self) = @_;
@@ -744,6 +803,15 @@ sub local_db_recorder_thread {
     my ($self) = @_;
     $self->_log(info => "local_db_recorder_thread started");
 
+    # Create thread-local SQLite connection
+    my $dbf = $self->{conf}->{db_file};
+    my $thread_dbh = DBI->connect("dbi:SQLite:dbname=$dbf","","", {
+        RaiseError => 1,
+        AutoCommit => 1,
+        PrintError => 0,
+    }) or die "Thread-local SQLite connect failed: $DBI::errstr";
+    $self->_log(info => "local_db_recorder_thread: established thread-local SQLite connection");
+
     while (!$shutdown || $record_blocked_ip_queue->pending() > 0) {
         my $item = $record_blocked_ip_queue->dequeue_timed(1);
         next unless $item;
@@ -753,8 +821,8 @@ sub local_db_recorder_thread {
 
         # Write to local SQLite (blocking I/O is acceptable here)
         eval {
-            $self->_db_upsert_jailed_ip($ip, $exp);
-            $self->_db_upsert_blocked_ip($ip, $exp, {
+            $self->_db_upsert_jailed_ip_with_handle($thread_dbh, $ip, $exp);
+            $self->_db_upsert_blocked_ip_with_handle($thread_dbh, $ip, $exp, {
                 service => $item->{source},
                 detector => $item->{detector},
             });
@@ -767,6 +835,8 @@ sub local_db_recorder_thread {
         $sync_to_central_db_queue->enqueue($item);
     }
 
+    # Close thread-local connection
+    $thread_dbh->disconnect() if $thread_dbh;
     $self->_log(info => "local_db_recorder_thread shutting down (drained queue)");
 }
 
