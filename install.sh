@@ -145,11 +145,21 @@ detect_os() {
 add_gpg_key() {
     echo ""
     echo -e "${BLUE}Adding Silver Linings, LLC GPG key...${NC}"
-    
-    mkdir -p /etc/apt/keyrings
+
+    # Remove old keys from both possible locations to avoid conflicts
     rm -f /etc/apt/keyrings/silver-linings.gpg
-    curl -fsSL "$GPG_KEY_URL" | gpg --batch --no-tty --dearmor -o /etc/apt/keyrings/silver-linings.gpg
-    
+    rm -f /etc/apt/trusted.gpg.d/silver-linings.gpg
+
+    mkdir -p /etc/apt/keyrings
+    if ! curl -fsSL "$GPG_KEY_URL" | gpg --batch --no-tty --dearmor -o /etc/apt/keyrings/silver-linings.gpg 2>&1; then
+        echo -e "${RED}✗${NC} Failed to download or install GPG key"
+        echo ""
+        echo "Please check:"
+        echo "  - Internet connectivity"
+        echo "  - GPG key URL is accessible: $GPG_KEY_URL"
+        exit 1
+    fi
+
     echo -e "${GREEN}✓${NC} GPG key added"
 }
 
@@ -165,14 +175,43 @@ add_repository() {
 # Update apt
 update_apt() {
     echo -e "${BLUE}Updating apt cache...${NC}"
-    apt-get update > /dev/null 2>&1
+    local output
+    if ! output=$(apt-get update 2>&1); then
+        echo -e "${RED}✗${NC} Failed to update apt cache"
+        echo ""
+        echo "Error output:"
+        echo "$output" | head -20
+        echo ""
+        echo "Common issues:"
+        echo "  - Conflicting GPG keys (check /etc/apt/keyrings/ and /etc/apt/trusted.gpg.d/)"
+        echo "  - Invalid sources.list entries"
+        echo "  - Network connectivity problems"
+        echo ""
+        echo "To fix GPG key conflicts:"
+        echo "  sudo rm -f /etc/apt/trusted.gpg.d/silver-linings.gpg"
+        echo "  sudo rm -f /etc/apt/keyrings/silver-linings.gpg"
+        echo "  Then run this installer again"
+        exit 1
+    fi
     echo -e "${GREEN}✓${NC} Apt cache updated"
 }
 
 # Install Bad IPs package
 install_badips() {
     echo -e "${BLUE}Installing Bad IPs package...${NC}"
-    DEBIAN_FRONTEND=noninteractive apt-get install -y bad-ips > /dev/null 2>&1
+    local output
+    if ! output=$(DEBIAN_FRONTEND=noninteractive apt-get install -y bad-ips 2>&1); then
+        echo -e "${RED}✗${NC} Failed to install Bad IPs package"
+        echo ""
+        echo "Error output:"
+        echo "$output" | head -20
+        echo ""
+        echo "Please check:"
+        echo "  - Repository is correctly configured"
+        echo "  - Package dependencies are available"
+        echo "  - Run: apt-cache policy bad-ips"
+        exit 1
+    fi
     echo -e "${GREEN}✓${NC} Bad IPs installed"
 }
 
@@ -188,9 +227,89 @@ test_pg_connection() {
     local dbname=$3
     local user=$4
     local password=$5
-    
-    PGPASSWORD="$password" psql -h "$host" -p "$port" -U "$user" -d "$dbname" -c "SELECT 1" > /dev/null 2>&1
+    local timeout=${6:-15}  # Default 15 second timeout
+
+    timeout "$timeout" bash -c "PGPASSWORD='$password' psql -h '$host' -p '$port' -U '$user' -d '$dbname' -c 'SELECT 1'" > /dev/null 2>&1
     return $?
+}
+
+# Test database connection with countdown and retry
+test_pg_connection_with_retry() {
+    local host=$1
+    local port=$2
+    local dbname=$3
+    local user=$4
+    local password=$5
+    local max_attempts=3
+    local timeout=15
+
+    for attempt in $(seq 1 $max_attempts); do
+        if [ $attempt -gt 1 ]; then
+            echo ""
+            echo -e "${YELLOW}Retry attempt $attempt of $max_attempts...${NC}"
+        fi
+
+        echo -n "Testing connection"
+
+        # Start connection test in background
+        ( PGPASSWORD="$password" psql -h "$host" -p "$port" -U "$user" -d "$dbname" -c "SELECT 1" > /dev/null 2>&1 ) &
+        local pid=$!
+
+        # Countdown timer
+        local elapsed=0
+        while [ $elapsed -lt $timeout ]; do
+            if ! kill -0 $pid 2>/dev/null; then
+                # Process finished
+                wait $pid
+                local result=$?
+                echo ""
+                if [ $result -eq 0 ]; then
+                    echo -e "${GREEN}✓${NC} Connection successful!"
+                    return 0
+                else
+                    echo -e "${RED}✗${NC} Connection failed!"
+                    break
+                fi
+            fi
+            echo -n "."
+            sleep 1
+            elapsed=$((elapsed + 1))
+        done
+
+        # Timeout reached
+        if kill -0 $pid 2>/dev/null; then
+            kill $pid 2>/dev/null
+            wait $pid 2>/dev/null
+            echo ""
+            echo -e "${RED}✗${NC} Connection timeout after ${timeout}s"
+        fi
+
+        # Ask for retry if not last attempt
+        if [ $attempt -lt $max_attempts ]; then
+            echo ""
+            echo "Please verify:"
+            echo "  - Database host is reachable: $host"
+            echo "  - PostgreSQL is running on $host:$port"
+            echo "  - Database '$dbname' exists"
+            echo "  - User '$user' has access"
+            echo "  - Password is correct"
+            echo ""
+            read -p "Retry connection? [Y/n/q to quit]: " retry
+            if [[ "$retry" =~ ^[Qq]$ ]]; then
+                exit 1
+            elif [[ "$retry" =~ ^[Nn]$ ]]; then
+                return 1
+            fi
+        fi
+    done
+
+    echo ""
+    echo -e "${RED}Failed to connect after $max_attempts attempts${NC}"
+    read -p "Continue anyway? [y/N]: " continue
+    if [[ ! "$continue" =~ ^[Yy]$ ]]; then
+        exit 1
+    fi
+    return 1
 }
 
 # Check if PostgreSQL is installed
@@ -405,10 +524,7 @@ configure_database() {
         DB_PASSWORD=$(read_password "Database password: ")
 
         echo ""
-        echo "Testing connection..."
-        if test_pg_connection "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$DB_PASSWORD"; then
-            echo -e "${GREEN}✓${NC} Connection successful!"
-            
+        if test_pg_connection_with_retry "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$DB_PASSWORD"; then
             # Check if tables exist
             TABLE_COUNT=$(PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -t -c "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = 'jailed_ips'" 2>/dev/null | tr -d ' ')
             
@@ -472,21 +588,8 @@ SQL
                     fi
                 fi
             fi
-        else
-            echo -e "${RED}✗${NC} Connection failed!"
-            echo ""
-            echo "Please verify:"
-            echo "  - Database host is reachable"
-            echo "  - PostgreSQL is running on $DB_HOST:$DB_PORT"
-            echo "  - Username and password are correct"
-            echo "  - Database '$DB_NAME' exists"
-            echo "  - PostgreSQL allows connections from this host"
-            echo ""
-            read -p "Continue anyway? [y/N]: " CONTINUE
-            if [[ ! "$CONTINUE" =~ ^[Yy]$ ]]; then
-                exit 1
-            fi
         fi
+        # If connection failed, test_pg_connection_with_retry already handled retry/exit logic
     fi
     
     # Save database configuration
