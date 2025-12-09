@@ -175,8 +175,54 @@ add_repository() {
 # Update apt
 update_apt() {
     echo -e "${BLUE}Updating apt cache...${NC}"
-    local output
-    if ! output=$(apt-get update 2>&1); then
+    local timeout=60
+    local tmpfile=$(mktemp)
+
+    # Run apt-get update in background with output to file
+    apt-get update > "$tmpfile" 2>&1 &
+    local pid=$!
+
+    # Show progress with timeout
+    local elapsed=0
+    local last_size=0
+    echo -n "Progress: "
+    while kill -0 $pid 2>/dev/null; do
+        if [ $elapsed -ge $timeout ]; then
+            kill $pid 2>/dev/null
+            wait $pid 2>/dev/null
+            echo ""
+            echo ""
+            echo -e "${YELLOW}⏱  apt update timed out after ${timeout}s${NC}"
+            echo ""
+            echo "This can happen due to slow network or repository issues."
+            echo ""
+            echo "Please run manually:"
+            echo "  sudo apt update"
+            echo ""
+            echo "Then re-run this installer:"
+            echo "  curl -fsSL https://projects.thedude.vip/bad-ips/install.sh | sudo bash"
+            rm -f "$tmpfile"
+            exit 1
+        fi
+
+        # Show activity indicator based on file size changes
+        local current_size=$(stat -f%z "$tmpfile" 2>/dev/null || stat -c%s "$tmpfile" 2>/dev/null || echo 0)
+        if [ "$current_size" != "$last_size" ]; then
+            echo -n "."
+            last_size=$current_size
+        fi
+
+        sleep 1
+        elapsed=$((elapsed + 1))
+    done
+
+    # Process completed, check exit status
+    wait $pid
+    local exit_code=$?
+    echo ""
+
+    if [ $exit_code -ne 0 ]; then
+        local output=$(cat "$tmpfile")
         echo -e "${RED}✗${NC} Failed to update apt cache"
         echo ""
         echo "Error output:"
@@ -191,8 +237,11 @@ update_apt() {
         echo "  sudo rm -f /etc/apt/trusted.gpg.d/silver-linings.gpg"
         echo "  sudo rm -f /etc/apt/keyrings/silver-linings.gpg"
         echo "  Then run this installer again"
+        rm -f "$tmpfile"
         exit 1
     fi
+
+    rm -f "$tmpfile"
     echo -e "${GREEN}✓${NC} Apt cache updated"
 }
 

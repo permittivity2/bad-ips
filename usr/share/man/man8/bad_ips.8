@@ -1,0 +1,291 @@
+.TH BAD_IPS 8 "December 2025" "Bad IPs 2.0.2" "System Administration"
+.SH NAME
+bad_ips \- distributed IP blocking system with centralized database
+.SH SYNOPSIS
+.B bad_ips
+[\fB\-\-test\-config\fR]
+[\fB\-\-dry\-run\fR]
+.SH DESCRIPTION
+.B bad_ips
+monitors system logs for malicious activity and automatically blocks offending IP addresses using nftables. It features a centralized PostgreSQL database for threat intelligence sharing across multiple servers.
+.PP
+When Bad IPs detects malicious activity on one server, that threat is immediately shared with all servers connected to the same database, providing distributed protection across your entire infrastructure.
+.SH OPTIONS
+.TP
+.BR \-\-test\-config
+Test the configuration file syntax and detector patterns without starting the service. Useful for validating changes before applying them.
+.TP
+.BR \-\-dry\-run
+Run in dry-run mode where IPs are detected but not actually blocked. Useful for testing pattern matching and troubleshooting.
+.SH FILES
+.TP
+.I /usr/local/etc/badips.conf
+Main configuration file containing global settings, blocking duration, trusted networks, and logging configuration.
+.TP
+.I /usr/local/etc/badips.d/database.conf
+Database connection configuration including host, port, credentials, and SSL settings.
+.TP
+.I /usr/local/etc/badips.d/*.conf
+Detector configuration files for various services (SSH, mail, web, DNS, etc.). Each detector defines systemd units to monitor and attack patterns to match.
+.TP
+.I /var/lib/bad_ips/
+Directory for local state files and failover logs.
+.TP
+.I /usr/share/doc/bad-ips/
+Documentation directory containing README and configuration guides.
+.SH CONFIGURATION
+.SS Main Configuration
+Edit
+.I /usr/local/etc/badips.conf
+to configure:
+.PP
+.RS
+.B [global]
+.br
+.B log_level
+= debug | info | warn | error
+.br
+.B block_duration
+= seconds to block IPs (default: 691200 = 8 days)
+.br
+.B never_block_cidrs
+= comma-separated list of trusted network CIDRs
+.br
+.B auto_mode
+= 1 to enable auto-discovery of services
+.RE
+.SS Database Configuration
+Edit
+.I /usr/local/etc/badips.d/database.conf
+to configure PostgreSQL connection:
+.PP
+.RS
+.B [global]
+.br
+.B db_host
+= database hostname or IP
+.br
+.B db_port
+= database port (default: 5432)
+.br
+.B db_name
+= database name
+.br
+.B db_user
+= database username
+.br
+.B db_password
+= database password
+.br
+.B db_ssl_mode
+= SSL mode (disable, require, verify-ca, verify-full)
+.RE
+.SS Detector Configuration
+Create detector files in
+.I /usr/local/etc/badips.d/
+with pattern:
+.I NN-name.conf
+.PP
+Example SSH detector
+.RI ( 10-sshd.conf ):
+.PP
+.RS
+.nf
+[detector:sshd]
+units = ssh.service, sshd.service
+pattern1 = Failed password for invalid user
+pattern2 = Failed password for root
+pattern3 = Connection closed by authenticating user
+.fi
+.RE
+.SH SYSTEMD INTEGRATION
+.B bad_ips
+is managed via systemd:
+.TP
+.B systemctl start bad_ips
+Start the Bad IPs service
+.TP
+.B systemctl stop bad_ips
+Stop the Bad IPs service (graceful shutdown with 300s timeout)
+.TP
+.B systemctl restart bad_ips
+Restart the service
+.TP
+.B systemctl reload bad_ips
+Reload configuration without restarting (sends SIGHUP)
+.TP
+.B systemctl status bad_ips
+Check service status
+.TP
+.B journalctl -u bad_ips.service -f
+View live logs
+.SH NFTABLES INTEGRATION
+Bad IPs creates and manages nftables sets for blocking:
+.TP
+.B nft list set inet filter badipv4
+View currently blocked IPv4 addresses
+.TP
+.B nft list ruleset
+View complete nftables configuration including Bad IPs rules
+.PP
+Blocked IPs are automatically added to the
+.B badipv4
+set with timeout. When the timeout expires, IPs are automatically unblocked.
+.SH EXAMPLES
+.SS Test Configuration
+.nf
+bad_ips --test-config
+.fi
+.PP
+Tests configuration syntax, database connectivity, and detector patterns.
+.SS Dry Run
+.nf
+bad_ips --dry-run
+.fi
+.PP
+Runs Bad IPs in detection-only mode. IPs are identified but not blocked - useful for testing patterns.
+.SS View Blocked IPs
+.nf
+sudo nft list set inet filter badipv4
+.fi
+.PP
+Shows all currently blocked IP addresses with their expiration times.
+.SS Reload Configuration
+.nf
+sudo systemctl reload bad_ips
+.fi
+.PP
+Reloads configuration files without restarting the service or clearing blocked IPs.
+.SS View Debug Logs
+.nf
+# Set log_level = debug in /usr/local/etc/badips.conf
+sudo systemctl reload bad_ips
+sudo journalctl -u bad_ips.service -f
+.fi
+.PP
+Enables verbose debug logging showing pattern matching details and IP extraction.
+.SH ARCHITECTURE
+Bad IPs uses a multi-threaded async architecture:
+.TP
+.B Main Thread
+Reads system logs from systemd journal and files, applies pattern matching, extracts IPs
+.TP
+.B NFT Blocker Thread
+Consumes IP queue and blocks IPs using nftables commands
+.TP
+.B Local DB Recorder Thread
+Records blocked IPs to local SQLite database for persistence
+.TP
+.B Central DB Sync Thread
+Syncs blocked IPs to centralized PostgreSQL database
+.TP
+.B Pull Global Blocks Thread
+Periodically pulls newly blocked IPs from other servers via database
+.SH SIGNALS
+.TP
+.B SIGTERM, SIGINT, SIGQUIT
+Initiate graceful shutdown. Threads are given 300 seconds to drain queues before forced termination.
+.TP
+.B SIGHUP
+Reload configuration files, detectors, and patterns without restarting the service.
+.SH LOGGING
+Bad IPs logs to syslog with facility
+.BR local0 .
+View logs with:
+.PP
+.nf
+journalctl -u bad_ips.service
+journalctl -u bad_ips.service -f    # follow/tail
+journalctl -u bad_ips.service --since "1 hour ago"
+.fi
+.PP
+Set
+.B log_level = debug
+in
+.I /usr/local/etc/badips.conf
+for verbose logging including:
+.RS
+- Log entries being processed
+.br
+- Pattern matching details
+.br
+- IP extraction information
+.br
+- Queue depths and statistics
+.RE
+.SH DATABASE SCHEMA
+Bad IPs uses the
+.B jailed_ips
+table in PostgreSQL:
+.PP
+.nf
+CREATE TABLE jailed_ips (
+    id SERIAL PRIMARY KEY,
+    ip VARCHAR(45) NOT NULL,
+    originating_server VARCHAR(255) NOT NULL,
+    originating_service VARCHAR(255),
+    detector_name VARCHAR(255),
+    pattern_matched TEXT,
+    matched_log_line TEXT,
+    first_blocked_at BIGINT NOT NULL,
+    last_seen_at BIGINT NOT NULL,
+    expires_at BIGINT NOT NULL,
+    block_count INTEGER DEFAULT 1,
+    UNIQUE(ip, originating_server)
+);
+.fi
+.SH NEVER-BLOCK NETWORKS
+Configure trusted networks that should never be blocked in
+.I /usr/local/etc/badips.conf:
+.PP
+.nf
+[global]
+never_block_cidrs = 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8
+.fi
+.PP
+This prevents accidentally locking yourself out. Always include your management networks and trusted IP ranges.
+.SH SECURITY CONSIDERATIONS
+.TP
+.B Database Credentials
+Protect
+.I /usr/local/etc/badips.d/database.conf
+which contains database passwords. The installer sets mode 600 (owner read/write only).
+.TP
+.B Never-Block CIDRs
+Always configure your trusted networks in
+.B never_block_cidrs
+to prevent lockouts.
+.TP
+.B Pattern Tuning
+Review and tune detector patterns to avoid false positives. Use
+.B \-\-dry\-run
+to test patterns before enabling.
+.TP
+.B Database Security
+Use strong passwords and consider SSL/TLS for database connections. Set
+.B db_ssl_mode = require
+or higher in production.
+.SH EXIT STATUS
+.TP
+.B 0
+Successful operation (test-config passed, service shutdown cleanly)
+.TP
+.B 1
+Configuration error, database connection failure, or other error
+.SH SEE ALSO
+.BR nft (8),
+.BR journalctl (1),
+.BR systemctl (1),
+.BR psql (1)
+.PP
+Online documentation:
+.UR https://projects.thedude.vip/bad-ips/
+.UE
+.SH BUGS
+Report bugs at:
+.UR https://github.com/permittivity2/bad-ips/issues
+.UE
+.SH AUTHOR
+Silver Linings, LLC
+.SH COPYRIGHT
+Copyright \(co 2025 Silver Linings, LLC. Proprietary software.

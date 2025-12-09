@@ -33,6 +33,7 @@ deb: clean
 	mkdir -p $(INSTALL_ROOT)/usr/local/etc/badips.d
 	mkdir -p $(INSTALL_ROOT)/etc/systemd/system
 	mkdir -p $(INSTALL_ROOT)/usr/share/doc/$(PACKAGE_NAME)
+	mkdir -p $(INSTALL_ROOT)/usr/share/man/man8
 	mkdir -p $(INSTALL_ROOT)/usr/local/share/bad_ips
 
 	# Copy DEBIAN control files
@@ -66,6 +67,10 @@ deb: clean
 	cp README.md $(INSTALL_ROOT)/usr/share/doc/$(PACKAGE_NAME)/
 	cp docs/CONFIGURATION.md $(INSTALL_ROOT)/usr/share/doc/$(PACKAGE_NAME)/
 	cp VERSION $(INSTALL_ROOT)/usr/share/doc/$(PACKAGE_NAME)/
+
+	# Copy man page
+	cp usr/share/man/man8/bad_ips.8 $(INSTALL_ROOT)/usr/share/man/man8/
+	gzip -9 $(INSTALL_ROOT)/usr/share/man/man8/bad_ips.8
 
 	# Set permissions
 	find $(INSTALL_ROOT) -type f -exec chmod 644 {} \;
