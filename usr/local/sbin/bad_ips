@@ -19,6 +19,7 @@ Log::Log4perl::init(\%logcfg);
 
 use lib '/usr/local/lib/site_perl';
 use BadIPs;
+use Config::Tiny;
 
 my $conf_main = '/usr/local/etc/badips.conf';
 my $conf_dir  = '/usr/local/etc/badips.d';
@@ -30,6 +31,19 @@ GetOptions(
   'test-config!' => \$test_config,
   'dry-run!'     => \$dry_run,
 ) or die "Usage: $0 [--test-config] [--dry-run]\n";
+
+# Read log_level from config before initializing logger
+my $log_level = 'INFO';
+if (-f $conf_main) {
+  my $cfg = Config::Tiny->read($conf_main);
+  if ($cfg && $cfg->{global} && $cfg->{global}{log_level}) {
+    $log_level = uc($cfg->{global}{log_level});
+  }
+}
+
+# Re-initialize Log4perl with correct log level
+$logcfg{'log4perl.rootLogger'} = "$log_level, SYS";
+Log::Log4perl::init(\%logcfg);
 
 my $app = BadIPs->new(
   conf_main => $conf_main,

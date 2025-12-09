@@ -992,7 +992,7 @@ sub _shutdown_gracefully {
 
 sub run_hunter {
     my ($self) = @_;
-    $self->_log(info => "Phase 10: Starting threaded hunter");
+    $self->_log(info => "Starting main thread to find and block bad IPs");
 
     # Setup signal handlers for graceful shutdown
     $SIG{QUIT} = sub { $self->_shutdown_gracefully("SIGQUIT"); };
@@ -1003,9 +1003,13 @@ sub run_hunter {
     # Start worker threads
     $self->_log(info => "Starting worker threads...");
 
+    $self->_log(debug => "Starting nft_blocker_thread");
     push @{$self->{threads}}, threads->create(sub { $self->nft_blocker_thread() });
+    $self->_log(debug => "Starting local_db_recorder_thread");
     push @{$self->{threads}}, threads->create(sub { $self->local_db_recorder_thread() });
+    $self->_log(debug => "Starting central_db_sync_thread");
     push @{$self->{threads}}, threads->create(sub { $self->central_db_sync_thread() });
+    $self->_log(debug => "Starting pull_global_blocks_thread");
     push @{$self->{threads}}, threads->create(sub { $self->pull_global_blocks_thread() });
 
     $self->_log(info => "All worker threads started");
@@ -1022,6 +1026,7 @@ sub run_hunter {
 
     while (!$shutdown) {
         $self->{run_count}++;
+        $self->_log(debug => "Run #$self->{run_count}: processing log entries");
 
         # Process log entries
         my $bad = $self->_bad_entries($entries);
@@ -1178,8 +1183,15 @@ sub _bad_entries {
         ? $self->{conf}->{compiled_patterns}
         : [ map { qr/$_/ } @{ $self->{conf}->{bad_conn_patterns} } ];
 
+    my $total_entries = 0;
+    for my $unit (keys %$entries) {
+        $total_entries += scalar(keys %{$entries->{$unit}});
+    }
+    $self->_log(debug => "Checking $total_entries log entries against " . scalar(@$patterns) . " patterns");
+
     for my $unit (keys %$entries) {
         my $u = $entries->{$unit};
+        $self->_log(debug => "Processing unit: $unit (" . scalar(keys %$u) . " entries)");
         ENTRY: for my $pid (keys %$u) {
             my $msg = $u->{$pid};
             my $pattern_num = 0;
@@ -1195,12 +1207,14 @@ sub _bad_entries {
                         detector => $self->_detector_name_from_unit($unit),
                         service => $self->_service_name_from_unit($unit)
                     };
-                    $self->_log(debug => "Unit $unit matched pattern#$pattern_num");
+                    $self->_log(debug => "Unit $unit matched pattern#$pattern_num: '" . $self->{conf}->{bad_conn_patterns}->[$pattern_num-1] . "'");
+                    $self->_log(debug => "Matched log line: " . substr($msg, 0, 100) . (length($msg) > 100 ? "..." : ""));
                     last ENTRY;
                 }
             }
         }
     }
+    $self->_log(debug => "Found " . scalar(keys %bad) . " bad entries");
     return \%bad;
 }
 
@@ -1225,6 +1239,8 @@ sub _remote_addresses {
     my ($self, $entries) = @_;
     my %ip_metadata = (); # ip => metadata
 
+    $self->_log(debug => "Extracting IPs from " . scalar(keys %$entries) . " bad entries");
+
     for my $k (keys %$entries) {
         my $entry = $entries->{$k};
         my $msg = ref($entry) eq 'HASH' ? $entry->{msg} : $entry;
@@ -1234,6 +1250,8 @@ sub _remote_addresses {
         while ($msg =~ /$RE{net}{IPv4}/g) {
             push @found_ips, $&;
         }
+
+        $self->_log(debug => "Extracted " . scalar(@found_ips) . " IPs from log entry") if @found_ips;
 
         # Store first IP found with its metadata
         if (@found_ips && ref($entry) eq 'HASH') {
@@ -1245,6 +1263,7 @@ sub _remote_addresses {
                         pattern => "pattern$entry->{pattern_num}: $entry->{pattern}",
                         log_line => $entry->{msg}
                     };
+                    $self->_log(debug => "Found IP $ip from detector '$entry->{detector}'");
                 }
             }
         } elsif (@found_ips) {
@@ -1256,7 +1275,11 @@ sub _remote_addresses {
     }
 
     my @ips = sort { $a cmp $b } keys %ip_metadata;
-    $self->_log(debug => "Returning: " . join(", ", @ips)) if @ips;
+    if (@ips) {
+        $self->_log(debug => "Extracted " . scalar(@ips) . " unique IPs: " . join(", ", @ips));
+    } else {
+        $self->_log(debug => "No IPs extracted from bad entries");
+    }
 
     # Return array ref of hashrefs: [ { ip => '1.2.3.4', metadata => {...} }, ... ]
     return [ map { { ip => $_, metadata => $ip_metadata{$_} } } @ips ];

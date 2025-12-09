@@ -8,8 +8,12 @@ StartLimitBurst=3
 [Service]
 Type=simple
 ExecStart=/usr/local/sbin/bad_ips
+ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=5s
+KillMode=mixed
+KillSignal=SIGTERM
+TimeoutStopSec=330
 
 [Install]
 WantedBy=multi-user.target
