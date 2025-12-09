@@ -64,6 +64,7 @@ sub new {
     $self->_init_db();                  # Local SQLite
     $self->_init_central_db();          # Central PostgreSQL
     $self->_initial_load_blocked_ips();
+    $self->_refresh_static_nftables_sets();  # Populate static sets at startup
     return $self;
 }
 
@@ -107,6 +108,8 @@ sub _load_config {
     # never_block_cidrs should ALWAYS be defined in badips.conf - no hardcoded default
     # This prevents accidentally blocking trusted networks if config is missing
     $accum{never_block_cidrs}         //= '';
+    # always_block_cidrs should be defined in badips.conf for known bad actors
+    $accum{always_block_cidrs}        //= '';
     $accum{db_dir}                    //= '/var/lib/bad_ips';
     $accum{db_file}                   //= '/var/lib/bad_ips/bad_ips.sql';
     $accum{log_level}                 //= 'INFO';   # honored by the app’s adapter, not here
@@ -118,10 +121,11 @@ sub _load_config {
     $accum{auto_mode}                 //= 1;
 
     # Normalize comma lists
-    $accum{journal_units}     = _csv_to_array($accum{journal_units});
-    $accum{bad_conn_patterns} = _csv_to_array($accum{bad_conn_patterns});
-    $accum{never_block_cidrs} = _csv_to_array($accum{never_block_cidrs});
-    $accum{file_sources}      = _csv_to_array($accum{file_sources});
+    $accum{journal_units}      = _csv_to_array($accum{journal_units});
+    $accum{bad_conn_patterns}  = _csv_to_array($accum{bad_conn_patterns});
+    $accum{never_block_cidrs}  = _csv_to_array($accum{never_block_cidrs});
+    $accum{always_block_cidrs} = _csv_to_array($accum{always_block_cidrs});
+    $accum{file_sources}       = _csv_to_array($accum{file_sources});
 
     $self->{conf} = \%accum;
 
@@ -1407,6 +1411,59 @@ sub _nft_as_json {
     return decode_json($out);
 }
 
+sub _refresh_static_nftables_sets {
+    my ($self) = @_;
+
+    my $table = $self->{conf}->{nft_table};
+    my $family_table = $self->{conf}->{nft_family_table};
+
+    # Refresh never_block set
+    $self->_log(info => "Refreshing never_block nftables set");
+    my $never_block_cidrs = $self->{conf}->{never_block_cidrs} || [];
+
+    # Flush the set and repopulate
+    system("nft flush set $table $family_table never_block 2>/dev/null");
+
+    for my $cidr (@$never_block_cidrs) {
+        next unless $cidr;
+        $cidr =~ s/^\s+|\s+$//g;  # trim whitespace
+        next unless $cidr;
+
+        # Handle both single IPs and CIDRs
+        my $result = system("nft add element $table $family_table never_block { $cidr } 2>/dev/null");
+        if ($result == 0) {
+            $self->_log(debug => "Added $cidr to never_block set");
+        } else {
+            $self->_log(error => "Failed to add $cidr to never_block set");
+        }
+    }
+
+    # Refresh always_block set
+    $self->_log(info => "Refreshing always_block nftables set");
+    my $always_block_cidrs = $self->{conf}->{always_block_cidrs} || [];
+
+    # Flush the set and repopulate
+    system("nft flush set $table $family_table always_block 2>/dev/null");
+
+    for my $cidr (@$always_block_cidrs) {
+        next unless $cidr;
+        $cidr =~ s/^\s+|\s+$//g;  # trim whitespace
+        next unless $cidr;
+
+        # Handle both single IPs and CIDRs
+        my $result = system("nft add element $table $family_table always_block { $cidr } 2>/dev/null");
+        if ($result == 0) {
+            $self->_log(info => "Added $cidr to always_block set");
+        } else {
+            $self->_log(error => "Failed to add $cidr to always_block set");
+        }
+    }
+
+    my $never_count = scalar(@$never_block_cidrs);
+    my $always_count = scalar(@$always_block_cidrs);
+    $self->_log(info => "Static sets refreshed: $never_count never_block, $always_count always_block");
+}
+
 # -------------------- signal handlers --------------------
 sub _reload_config_signal {
     my ($self) = @_;
@@ -1415,6 +1472,7 @@ sub _reload_config_signal {
         $self->_load_config();
         $self->{detectors} = $self->_load_detectors_from_confdir();
         $self->_auto_discover_sources();
+        $self->_refresh_static_nftables_sets();
         $self->_log(info => "New config:\n" . $self->_report_config());
     };
     if ($@) {

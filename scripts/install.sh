@@ -2,7 +2,7 @@
 # Bad IPs Installation Script
 # Copyright (c) 2025 Silver Linings, LLC
 #
-# Usage: curl -fsSL https://projects.thedude.vip/bad-ips/install.sh | sudo bash
+# Usage: Become root then -->> bash <(curl -fsSL https://projects.thedude.vip/bad-ips/install.sh)
 
 set -e
 

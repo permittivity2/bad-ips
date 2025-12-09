@@ -1,6 +1,6 @@
 # 🛡️ Bad IPs - Distributed IP Blocking System
 
-[![Version](https://img.shields.io/badge/version-2.0.2-blue.svg)](https://github.com/permittivity2/bad-ips/releases)
+[![Version](https://img.shields.io/badge/version-2.0.5-blue.svg)](https://github.com/permittivity2/bad-ips/releases)
 [![License](https://img.shields.io/badge/license-Proprietary-red.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Debian%20%7C%20Ubuntu-orange.svg)](https://projects.thedude.vip/bad-ips/)
 
@@ -13,7 +13,7 @@
 Install Bad IPs on Ubuntu/Debian with a single command:
 
 ```bash
-curl -fsSL https://projects.thedude.vip/bad-ips/install.sh | sudo bash
+bash <(curl -fsSL https://projects.thedude.vip/bad-ips/install.sh)
 ```
 
 The installer will:
@@ -82,7 +82,7 @@ Proprietary - Silver Linings, LLC
 ## 🔗 Links
 
 - **Documentation**: https://projects.thedude.vip/bad-ips/
-- **Installation**: `curl -fsSL https://projects.thedude.vip/bad-ips/install.sh | sudo bash`
+- **Installation**: `bash <(curl -fsSL https://projects.thedude.vip/bad-ips/install.sh)`
 - **APT Repository**: https://projects.thedude.vip/apt/
 - **Support**: File an issue on GitHub
 

@@ -1,4 +1,4 @@
-.TH BAD_IPS 8 "December 2025" "Bad IPs 2.0.2" "System Administration"
+.TH BAD_IPS 8 "December 2025" "Bad IPs 2.0.5" "System Administration"
 .SH NAME
 bad_ips \- distributed IP blocking system with centralized database
 .SH SYNOPSIS
@@ -120,17 +120,32 @@ Check service status
 .B journalctl -u bad_ips.service -f
 View live logs
 .SH NFTABLES INTEGRATION
-Bad IPs creates and manages nftables sets for blocking:
+Bad IPs creates and manages three nftables sets for IP filtering:
+.TP
+.B nft list set inet filter never_block
+View trusted networks (static, no timeout)
+.TP
+.B nft list set inet filter always_block
+View permanently blocked networks (static, no timeout)
 .TP
 .B nft list set inet filter badipv4
-View currently blocked IPv4 addresses
+View dynamically blocked IPv4 addresses (with timeout)
 .TP
 .B nft list ruleset
 View complete nftables configuration including Bad IPs rules
 .PP
-Blocked IPs are automatically added to the
+Rules are processed in precedence order:
+.RS
+1. IPs in never_block are always ACCEPTED
+.br
+2. IPs in always_block are always DROPPED
+.br
+3. IPs in badipv4 are DROPPED with automatic timeout
+.RE
+.PP
+Dynamically blocked IPs are automatically added to the
 .B badipv4
-set with timeout. When the timeout expires, IPs are automatically unblocked.
+set with timeout. When the timeout expires, IPs are automatically unblocked. Static sets (never_block and always_block) are refreshed on service start and reload.
 .SH EXAMPLES
 .SS Test Configuration
 .nf
@@ -244,6 +259,27 @@ never_block_cidrs = 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8
 .fi
 .PP
 This prevents accidentally locking yourself out. Always include your management networks and trusted IP ranges.
+.SH ALWAYS-BLOCK NETWORKS
+Configure networks that should always be blocked in
+.I /usr/local/etc/badips.conf:
+.PP
+.nf
+[global]
+always_block_cidrs = 198.51.100.0/24,203.0.113.0/24
+.fi
+.PP
+Use this for known bad actor networks, geographic blocking, or competitor reconnaissance IPs. These IPs are permanently blocked at the firewall level but still logged to the database for reporting.
+.PP
+Precedence order (highest to lowest):
+.RS
+1. never_block_cidrs (always allowed)
+.br
+2. always_block_cidrs (always blocked)
+.br
+3. badipv4 (dynamically blocked based on detections)
+.RE
+.PP
+Note: IPs in always_block are still added to badipv4 and the database for reporting purposes. Different servers can have different always_block configurations based on their role.
 .SH SECURITY CONSIDERATIONS
 .TP
 .B Database Credentials

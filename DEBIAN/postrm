@@ -9,13 +9,23 @@ case "$1" in
             rm -rf /var/lib/bad_ips
         fi
 
-        # Note: We do NOT remove the nftables set automatically
-        # The user may want to keep blocks in place even after uninstall
-        echo ""
-        echo "NOTE: nftables set 'badipv4' was NOT removed."
-        echo "To manually remove it:"
-        echo "  sudo nft delete set inet filter badipv4"
-        echo ""
+        # Clean up nftables rules and sets
+        echo "Cleaning up nftables configuration..."
+
+        # Remove rules that reference our sets (must be done first)
+        nft list chain inet filter input 2>/dev/null | grep -q "@never_block" && \
+            nft delete rule inet filter input ip saddr @never_block accept 2>/dev/null || true
+        nft list chain inet filter input 2>/dev/null | grep -q "@always_block" && \
+            nft delete rule inet filter input ip saddr @always_block drop 2>/dev/null || true
+        nft list chain inet filter input 2>/dev/null | grep -q "@badipv4" && \
+            nft delete rule inet filter input ip saddr @badipv4 drop 2>/dev/null || true
+
+        # Remove sets
+        nft delete set inet filter never_block 2>/dev/null || true
+        nft delete set inet filter always_block 2>/dev/null || true
+        nft delete set inet filter badipv4 2>/dev/null || true
+
+        echo "✓ nftables configuration cleaned up"
         ;;
 
     remove|upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)

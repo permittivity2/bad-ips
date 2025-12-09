@@ -139,8 +139,13 @@
                 </tr>
                 <tr>
                     <td><code>never_block_cidrs</code></td>
-                    <td>Comma-separated CIDRs that are never blocked</td>
+                    <td>Comma-separated CIDRs that are never blocked (highest priority)</td>
                     <td><em>Required</em></td>
+                </tr>
+                <tr>
+                    <td><code>always_block_cidrs</code></td>
+                    <td>Comma-separated CIDRs that are always blocked (static firewall rules)</td>
+                    <td><em>Optional</em></td>
                 </tr>
                 <tr>
                     <td><code>auto_mode</code></td>
@@ -165,6 +170,9 @@ block_duration = 691200
 # Never block these networks (CRITICAL!)
 never_block_cidrs = 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,23.116.91.65/29
 
+# Always block these networks (optional)
+always_block_cidrs = 198.51.100.0/24,203.0.113.0/24
+
 # Performance
 auto_mode = 1
 cleanup_every_seconds = 3600</div>
@@ -172,6 +180,22 @@ cleanup_every_seconds = 3600</div>
             <div class="alert">
                 <strong>⚠️ Critical:</strong> Always configure <code>never_block_cidrs</code> with your management networks to prevent lockouts!
             </div>
+
+            <h3>IP Filtering Precedence</h3>
+            <p>Bad IPs uses three nftables sets with the following precedence order (highest to lowest):</p>
+            <ol>
+                <li><strong>never_block</strong> (static) - IPs/CIDRs that are always allowed, regardless of detections</li>
+                <li><strong>always_block</strong> (static) - IPs/CIDRs that are always blocked at the firewall level</li>
+                <li><strong>badipv4</strong> (dynamic with timeout) - IPs dynamically blocked based on detections</li>
+            </ol>
+            <p><strong>Use cases for always_block:</strong></p>
+            <ul>
+                <li>Known bad actor networks or botnets</li>
+                <li>Geographic blocking (countries you don't serve)</li>
+                <li>Competitor reconnaissance IPs</li>
+                <li>Cloud scanner networks (Shodan, Censys, etc.)</li>
+            </ul>
+            <p><strong>Note:</strong> IPs in always_block are still logged to the database for reporting purposes. Different servers can have different always_block configurations based on their role (e.g., block on DNS/mail but not web).</p>
         </div>
 
         <div class="card" id="database">
@@ -347,6 +371,7 @@ pattern3 = query failed \(SERVFAIL\)</div>
 log_level = info
 block_duration = 691200
 never_block_cidrs = 192.168.1.0/24,127.0.0.0/8
+always_block_cidrs = 198.51.100.0/24
 
 # /usr/local/etc/badips.d/database.conf
 [global]
@@ -369,6 +394,7 @@ pattern1 = Failed password</div>
 log_level = info
 block_duration = 691200
 never_block_cidrs = 10.0.0.0/8,172.16.0.0/12
+always_block_cidrs = 203.0.113.0/24,198.51.100.0/24
 
 # /usr/local/etc/badips.d/database.conf
 [global]
