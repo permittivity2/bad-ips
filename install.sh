@@ -118,7 +118,7 @@ check_nftables() {
 check_root() {
     if [[ $EUID -ne 0 ]]; then
         echo -e "${RED}Error: This script must be run as root${NC}"
-        echo "Usage: curl -fsSL https://projects.thedude.vip/bad-ips/install.sh | sudo bash"
+        echo "Usage: become root then -->> bash <(curl -fsSL https://projects.thedude.vip/bad-ips/install.sh)"
         exit 1
     fi
 }
@@ -753,35 +753,82 @@ configure_never_block() {
     echo "$NEVER_BLOCK_CIDRS" | tr ',' '\n' | sed 's/^/  /'
 }
 
+# Configure always_block_cidrs
+configure_always_block() {
+    echo ""
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${YELLOW}  ALWAYS BLOCK NETWORKS - OPTIONAL${NC}"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo "Configure networks that should ALWAYS be blocked."
+    echo "These IPs/CIDRs will be permanently blocked at the firewall level."
+    echo ""
+    echo "Common use cases:"
+    echo "  - Known bad actor networks"
+    echo "  - Geographic blocking (e.g., countries you don't serve)"
+    echo "  - Competitor reconnaissance IPs"
+    echo "  - Cloud scanner networks"
+    echo ""
+    echo "Note: never_block takes precedence over always_block"
+    echo ""
+
+    read -p "Enter comma-separated CIDRs to always block (or press Enter to skip): " USER_ALWAYS_CIDRS
+    ALWAYS_BLOCK_CIDRS=${USER_ALWAYS_CIDRS:-}
+
+    if [[ -n "$ALWAYS_BLOCK_CIDRS" ]]; then
+        echo ""
+        echo "Always-block networks configured:"
+        echo "$ALWAYS_BLOCK_CIDRS" | tr ',' '\n' | sed 's/^/  /'
+    else
+        echo ""
+        echo -e "${CYAN}No always-block networks configured (can add later in badips.conf)${NC}"
+    fi
+}
+
 # Setup nftables
 setup_nftables() {
     echo ""
     echo -e "${BLUE}Setting up nftables firewall rules...${NC}"
-    
+
     # Create table and chain if they don't exist
     nft add table inet filter 2>/dev/null || true
     nft add chain inet filter input '{ type filter hook input priority 0 ; }' 2>/dev/null || true
-    
-    # Create badipv4 set
+
+    # Create never_block set (static, no timeout)
+    nft add set inet filter never_block '{ type ipv4_addr; }' 2>/dev/null || true
+
+    # Create always_block set (static, no timeout)
+    nft add set inet filter always_block '{ type ipv4_addr; }' 2>/dev/null || true
+
+    # Create badipv4 set (dynamic with timeout)
     nft add set inet filter badipv4 '{ type ipv4_addr; flags timeout; }' 2>/dev/null || true
-    
-    # Add drop rule if it doesn't exist
+
+    # Add rules in correct precedence order if they don't exist
+    # 1. Never block (highest priority) - ACCEPT
+    nft list chain inet filter input | grep -q "ip saddr @never_block accept" || \
+        nft add rule inet filter input ip saddr @never_block accept
+
+    # 2. Always block - DROP
+    nft list chain inet filter input | grep -q "ip saddr @always_block drop" || \
+        nft add rule inet filter input ip saddr @always_block drop
+
+    # 3. Dynamic blocks - DROP
     nft list chain inet filter input | grep -q "ip saddr @badipv4 drop" || \
         nft add rule inet filter input ip saddr @badipv4 drop
-    
+
     # Make nftables persistent
     mkdir -p /etc/nftables.d
     nft list ruleset > /etc/nftables.d/bad_ips.nft
-    
+
     # Add include to main nftables config if not already there
     if [[ -f /etc/nftables.conf ]]; then
         grep -q "include \"/etc/nftables.d/bad_ips.nft\"" /etc/nftables.conf || \
             echo 'include "/etc/nftables.d/bad_ips.nft"' >> /etc/nftables.conf
     fi
-    
+
     systemctl enable nftables 2>/dev/null || true
-    
-    echo -e "${GREEN}✓${NC} nftables configured"
+
+    echo -e "${GREEN}✓${NC} nftables configured with never_block, always_block, and badipv4 sets"
 }
 
 # Generate main badips.conf
@@ -802,6 +849,7 @@ block_duration = 691200  # 8 days
 
 # Network filtering
 never_block_cidrs = $NEVER_BLOCK_CIDRS
+always_block_cidrs = $ALWAYS_BLOCK_CIDRS
 
 # Performance tuning
 auto_mode = 1
@@ -877,7 +925,8 @@ main() {
     configure_database
     configure_services
     configure_never_block
-    
+    configure_always_block
+
     generate_config
     setup_nftables
     enable_service
