@@ -831,7 +831,7 @@ sub central_db_sync_thread {
         # Batch INSERT to PostgreSQL
         eval {
             for my $item (@batch) {
-                my $now = time();
+                my $now = int(time());
                 my $expires = $now + $self->{conf}->{blocking_time};
 
                 my $sth = $thread_dbh->prepare(
