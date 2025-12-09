@@ -1,0 +1,13 @@
+.git
+.git/*
+.gitignore
+.vscode
+.vscode/*
+*.deb
+website
+website/*
+build
+build/*
+.dpkg-ignore
+README.md
+LICENSE
