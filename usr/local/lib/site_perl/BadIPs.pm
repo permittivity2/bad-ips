@@ -708,7 +708,7 @@ sub _db_upsert_blocked_ip_with_handle {
 sub run {
     my ($self) = @_;
 
-    $self->_log(info => "Starting Bad IPs monitoring");
+    $self->_log(info => "Starting Bad IPs monitoring (multi-threaded mode with centralized database sync)");
     return $self->run_hunter();
 }
 
