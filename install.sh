@@ -609,7 +609,8 @@ configure_database() {
                 else
                     echo ""
                     echo "Creating tables..."
-                    if PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" <<'SQL' 2>&1
+                    local tmpout=$(mktemp)
+                    if PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" > "$tmpout" 2>&1 <<'SQL'
 CREATE TABLE IF NOT EXISTS jailed_ips (
     id SERIAL PRIMARY KEY,
     ip VARCHAR(45) NOT NULL,
@@ -630,11 +631,22 @@ SQL
                     then
                         echo -e "${GREEN}✓${NC} Tables created successfully!"
                     else
-                        echo -e "${RED}✗${NC} Failed to create tables."
+                        echo -e "${RED}✗${NC} Failed to create tables"
                         echo ""
-                        echo "Please ensure your database user has CREATE TABLE privileges."
-                        echo "You may need to create the tables manually."
+                        cat "$tmpout"
+                        echo ""
+                        echo -e "${YELLOW}Common issue: User lacks CREATE privileges on schema${NC}"
+                        echo ""
+                        echo "To fix, run as database admin (e.g., postgres user):"
+                        echo ""
+                        echo "  psql -h $DB_HOST -p $DB_PORT -d $DB_NAME -U postgres <<EOF"
+                        echo "  GRANT CREATE ON SCHEMA public TO $DB_USER;"
+                        echo "  EOF"
+                        echo ""
+                        echo "Then run the installer again, or create tables manually."
+                        echo ""
                     fi
+                    rm -f "$tmpout"
                 fi
             fi
         fi
