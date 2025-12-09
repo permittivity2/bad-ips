@@ -45,7 +45,7 @@ The documentation includes:
 
 Bad IPs monitors your system logs for malicious activity and automatically blocks offending IP addresses using nftables. With a **centralized PostgreSQL database**, threats detected on one server are immediately shared across your entire infrastructure.
 
-### The NAFTA Effect
+### The NATO Effect
 
 > *"An attack on one is an attack on all."*
 
