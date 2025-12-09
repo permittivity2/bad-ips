@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Configuration Reference - Bad IPs</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: #f5f5f5;
+        }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px 20px;
+            text-align: center;
+            margin-bottom: 40px;
+            border-radius: 0 0 20px 20px;
+        }
+        header h1 { font-size: 2.5em; margin-bottom: 10px; }
+        .breadcrumb { margin-bottom: 20px; }
+        .breadcrumb a { color: #667eea; text-decoration: none; }
+        .card {
+            background: white;
+            padding: 30px;
+            margin-bottom: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h2 {
+            color: #667eea;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 3px solid #667eea;
+        }
+        h3 { color: #764ba2; margin: 25px 0 15px 0; }
+        h4 { color: #667eea; margin: 15px 0 10px 0; }
+        .code-block {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 20px;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            overflow-x: auto;
+            margin: 15px 0;
+        }
+        code {
+            background: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background: #667eea;
+            color: white;
+            font-weight: 600;
+        }
+        tr:hover { background: #f5f5f5; }
+        .alert {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            border-left: 5px solid #ffc107;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        .alert.info { background: #d1ecf1; border-color: #0c5460; }
+        ul, ol { margin: 15px 0 15px 30px; }
+        li { margin: 8px 0; }
+        a { color: #667eea; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .toc {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+        }
+        .toc ul { margin-left: 20px; }
+        footer { text-align: center; padding: 40px 20px; color: #666; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>📚 Configuration Reference</h1>
+        <p>Complete guide to configuring Bad IPs</p>
+    </header>
+
+    <div class="container">
+        <div class="breadcrumb">
+            <a href="index.html">← Back to Main</a>
+        </div>
+
+        <div class="toc card">
+            <h2>Table of Contents</h2>
+            <ul>
+                <li><a href="#main">Main Configuration (badips.conf)</a></li>
+                <li><a href="#database">Database Configuration</a></li>
+                <li><a href="#detectors">Detector Configuration</a></li>
+                <li><a href="#patterns">Pattern Matching</a></li>
+                <li><a href="#examples">Complete Examples</a></li>
+            </ul>
+        </div>
+
+        <div class="card" id="main">
+            <h2>Main Configuration</h2>
+            <p>File: <code>/usr/local/etc/badips.conf</code></p>
+            
+            <h3>Global Settings</h3>
+            <table>
+                <tr>
+                    <th>Parameter</th>
+                    <th>Description</th>
+                    <th>Default</th>
+                </tr>
+                <tr>
+                    <td><code>log_level</code></td>
+                    <td>Logging verbosity: debug, info, warn, error</td>
+                    <td>info</td>
+                </tr>
+                <tr>
+                    <td><code>block_duration</code></td>
+                    <td>How long to block IPs (seconds)</td>
+                    <td>691200 (8 days)</td>
+                </tr>
+                <tr>
+                    <td><code>never_block_cidrs</code></td>
+                    <td>Comma-separated CIDRs that are never blocked</td>
+                    <td><em>Required</em></td>
+                </tr>
+                <tr>
+                    <td><code>auto_mode</code></td>
+                    <td>Auto-discover services (1=enabled, 0=disabled)</td>
+                    <td>1</td>
+                </tr>
+                <tr>
+                    <td><code>cleanup_every_seconds</code></td>
+                    <td>How often to clean expired blocks</td>
+                    <td>3600</td>
+                </tr>
+            </table>
+
+            <h3>Example Configuration</h3>
+            <div class="code-block">[global]
+# Logging
+log_level = debug
+
+# Blocking duration (8 days)
+block_duration = 691200
+
+# Never block these networks (CRITICAL!)
+never_block_cidrs = 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,23.116.91.65/29
+
+# Performance
+auto_mode = 1
+cleanup_every_seconds = 3600</div>
+
+            <div class="alert">
+                <strong>⚠️ Critical:</strong> Always configure <code>never_block_cidrs</code> with your management networks to prevent lockouts!
+            </div>
+        </div>
+
+        <div class="card" id="database">
+            <h2>Database Configuration</h2>
+            <p>File: <code>/usr/local/etc/badips.d/database.conf</code></p>
+            <p>Permissions: <strong>600</strong> (contains passwords)</p>
+
+            <h3>Database Parameters</h3>
+            <table>
+                <tr>
+                    <th>Parameter</th>
+                    <th>Description</th>
+                    <th>Example</th>
+                </tr>
+                <tr>
+                    <td><code>db_host</code></td>
+                    <td>Database hostname or IP</td>
+                    <td>10.10.0.116</td>
+                </tr>
+                <tr>
+                    <td><code>db_port</code></td>
+                    <td>Database port</td>
+                    <td>5432</td>
+                </tr>
+                <tr>
+                    <td><code>db_name</code></td>
+                    <td>Database name</td>
+                    <td>bad_ips</td>
+                </tr>
+                <tr>
+                    <td><code>db_user</code></td>
+                    <td>Database username</td>
+                    <td>bad_ips_admin</td>
+                </tr>
+                <tr>
+                    <td><code>db_password</code></td>
+                    <td>Database password</td>
+                    <td><em>secret</em></td>
+                </tr>
+                <tr>
+                    <td><code>db_ssl_mode</code></td>
+                    <td>SSL mode: disable, require, verify-ca, verify-full</td>
+                    <td>disable</td>
+                </tr>
+            </table>
+
+            <h3>Example Configuration</h3>
+            <div class="code-block">[global]
+db_host = 10.10.0.116
+db_port = 5432
+db_name = bad_ips
+db_user = bad_ips_admin
+db_password = your_secure_password_here
+db_ssl_mode = require</div>
+
+            <h3>Database Schema</h3>
+            <p>Bad IPs uses the <code>jailed_ips</code> table:</p>
+            <div class="code-block">CREATE TABLE jailed_ips (
+    id SERIAL PRIMARY KEY,
+    ip VARCHAR(45) NOT NULL,
+    originating_server VARCHAR(255) NOT NULL,
+    originating_service VARCHAR(255),
+    detector_name VARCHAR(255),
+    pattern_matched TEXT,
+    matched_log_line TEXT,
+    first_blocked_at BIGINT NOT NULL,
+    last_seen_at BIGINT NOT NULL,
+    expires_at BIGINT NOT NULL,
+    block_count INTEGER DEFAULT 1,
+    UNIQUE(ip, originating_server)
+);
+CREATE INDEX idx_jailed_ips_expires ON jailed_ips(expires_at);
+CREATE INDEX idx_jailed_ips_ip ON jailed_ips(ip);</div>
+        </div>
+
+        <div class="card" id="detectors">
+            <h2>Detector Configuration</h2>
+            <p>Directory: <code>/usr/local/etc/badips.d/</code></p>
+            <p>Naming: <code>NN-service.conf</code> (e.g., <code>10-sshd.conf</code>)</p>
+
+            <h3>Detector Format</h3>
+            <div class="code-block">[detector:name]
+units = service1.service, service2.service
+pattern1 = regex pattern to match
+pattern2 = another pattern
+pattern3 = yet another pattern</div>
+
+            <h3>Pre-configured Detectors</h3>
+
+            <h4>SSH (10-sshd.conf)</h4>
+            <div class="code-block">[detector:sshd]
+units = ssh.service, sshd.service
+pattern1 = Failed password for invalid user
+pattern2 = Failed password for root
+pattern3 = Connection closed by authenticating user</div>
+
+            <h4>Postfix Mail (20-postfix.conf)</h4>
+            <div class="code-block">[detector:postfix]
+units = postfix@-.service, postfix.service
+pattern1 = Relay access denied
+pattern2 = Illegal address syntax from
+pattern3 = SASL LOGIN authentication failed
+pattern4 = SSL_accept error from
+pattern5 = non-SMTP command from unknown</div>
+
+            <h4>Dovecot IMAP/POP3 (30-dovecot.conf)</h4>
+            <div class="code-block">[detector:dovecot]
+units = dovecot.service
+pattern1 = Aborted login
+pattern2 = Disconnected.*rip=
+pattern3 = Auth failed
+pattern4 = Invalid user</div>
+
+            <h4>Nginx Web (40-nginx.conf)</h4>
+            <div class="code-block">[detector:nginx]
+units = nginx.service
+pattern1 = 404.*GET /wp-admin
+pattern2 = 404.*GET /wp-login
+pattern3 = 400 Bad Request</div>
+
+            <h4>BIND DNS (70-bind.conf)</h4>
+            <div class="code-block">[detector:bind]
+units = named.service, bind9.service
+pattern1 = query failed \(REFUSED\)
+pattern2 = rate limiting
+pattern3 = query failed \(SERVFAIL\)</div>
+        </div>
+
+        <div class="card" id="patterns">
+            <h2>Pattern Matching</h2>
+            
+            <h3>Pattern Syntax</h3>
+            <p>Patterns are Perl-compatible regular expressions (PCRE).</p>
+
+            <h3>Common Patterns</h3>
+            <table>
+                <tr>
+                    <th>Pattern</th>
+                    <th>Matches</th>
+                </tr>
+                <tr>
+                    <td><code>Failed password</code></td>
+                    <td>Literal string "Failed password"</td>
+                </tr>
+                <tr>
+                    <td><code>Failed password.*root</code></td>
+                    <td>"Failed password" followed by "root"</td>
+                </tr>
+                <tr>
+                    <td><code>404.*wp-admin</code></td>
+                    <td>404 errors accessing wp-admin</td>
+                </tr>
+                <tr>
+                    <td><code>Disconnected.*rip=</code></td>
+                    <td>Disconnection messages with IP</td>
+                </tr>
+            </table>
+
+            <h3>IP Extraction</h3>
+            <p>Bad IPs automatically extracts IPv4 addresses from matched log lines. No special configuration needed.</p>
+
+            <h3>Testing Patterns</h3>
+            <div class="code-block">bad_ips --dry-run</div>
+            <p>Runs Bad IPs in detection-only mode. IPs are identified but not blocked.</p>
+        </div>
+
+        <div class="card" id="examples">
+            <h2>Complete Examples</h2>
+
+            <h3>Example 1: Single Server</h3>
+            <div class="code-block"># /usr/local/etc/badips.conf
+[global]
+log_level = info
+block_duration = 691200
+never_block_cidrs = 192.168.1.0/24,127.0.0.0/8
+
+# /usr/local/etc/badips.d/database.conf
+[global]
+db_host = localhost
+db_port = 5432
+db_name = bad_ips
+db_user = bad_ips
+db_password = password123
+
+# /usr/local/etc/badips.d/10-sshd.conf
+[detector:sshd]
+units = ssh.service
+pattern1 = Failed password</div>
+
+            <h3>Example 2: Multi-Server with Central Database</h3>
+            <div class="code-block"># Same config on all servers:
+
+# /usr/local/etc/badips.conf
+[global]
+log_level = info
+block_duration = 691200
+never_block_cidrs = 10.0.0.0/8,172.16.0.0/12
+
+# /usr/local/etc/badips.d/database.conf
+[global]
+db_host = 10.10.0.100  # Central DB server
+db_port = 5432
+db_name = bad_ips
+db_user = bad_ips_admin
+db_password = shared_password
+db_ssl_mode = require
+
+# Each server has detectors for its services</div>
+
+            <h3>Example 3: Debug Mode</h3>
+            <div class="code-block"># For troubleshooting, enable debug logging:
+[global]
+log_level = debug
+
+# Then reload and watch logs:
+sudo systemctl reload bad_ips
+sudo journalctl -u bad_ips.service -f</div>
+        </div>
+
+        <div class="card">
+            <h2>Service Management</h2>
+            <h3>Common Commands</h3>
+            <div class="code-block"># Check status
+systemctl status bad_ips
+
+# Reload configuration (no restart needed)
+systemctl reload bad_ips
+
+# Restart service
+systemctl restart bad_ips
+
+# View logs
+journalctl -u bad_ips.service -f
+
+# Test configuration
+bad_ips --test-config
+
+# View blocked IPs
+sudo nft list set inet filter badipv4</div>
+        </div>
+
+        <div class="alert info">
+            <strong>💡 Tip:</strong> After making configuration changes, use <code>systemctl reload bad_ips</code> instead of restart to apply changes without clearing blocked IPs.
+        </div>
+    </div>
+
+    <footer>
+        <p><a href="index.html">← Back to Main</a></p>
+        <p>Bad IPs v2.0.3 - Silver Linings, LLC</p>
+    </footer>
+</body>
+</html>

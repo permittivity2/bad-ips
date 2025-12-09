@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Bad IPs - Distributed IP Blocking System</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: #f5f5f5;
+        }
+        .container { max-width: 1000px; margin: 0 auto; padding: 20px; }
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 60px 20px;
+            text-align: center;
+            margin-bottom: 40px;
+            border-radius: 0 0 20px 20px;
+        }
+        header h1 { font-size: 3em; margin-bottom: 10px; }
+        .card {
+            background: white;
+            padding: 30px;
+            margin-bottom: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h2 {
+            color: #667eea;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 3px solid #667eea;
+        }
+        h3 { color: #764ba2; margin: 25px 0 15px 0; }
+        .install-box {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 20px;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+            overflow-x: auto;
+            margin: 20px 0;
+        }
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+        .feature {
+            padding: 15px;
+            background: #f8f9fa;
+            border-left: 4px solid #667eea;
+            border-radius: 5px;
+        }
+        .alert {
+            background: #fff3cd;
+            border: 1px solid #ffc107;
+            border-left: 5px solid #ffc107;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        .alert.info { background: #d1ecf1; border-color: #0c5460; }
+        ul { margin: 15px 0 15px 30px; }
+        li { margin: 8px 0; }
+        a { color: #667eea; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        .nav {
+            background: white;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .nav a { margin-right: 20px; font-weight: 500; }
+        footer { text-align: center; padding: 40px 20px; color: #666; }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>🛡️ Bad IPs</h1>
+        <p style="font-size:1.2em;opacity:0.9">v2.0.3 - Distributed IP Blocking System</p>
+        <p>Real-time threat detection with centralized database</p>
+    </header>
+
+    <div class="container">
+        <nav class="nav">
+            <a href="#install">Installation</a>
+            <a href="#features">Features</a>
+            <a href="#config">Configuration</a>
+            <a href="configuration.html">Config Reference</a>
+            <a href="#support">Support</a>
+        </nav>
+
+        <div class="card" id="install">
+            <h2>🚀 Quick Start</h2>
+            <p>Install Bad IPs on Ubuntu/Debian with a single command:</p>
+            <div class="install-box">curl -fsSL https://projects.thedude.vip/bad-ips/install.sh | sudo bash</div>
+            <p>The installer will:</p>
+            <ul>
+                <li>Add the Silver Linings apt repository</li>
+                <li>Install Bad IPs and dependencies</li>
+                <li>Configure PostgreSQL database connection</li>
+                <li>Set up detectors for your services</li>
+                <li>Configure trusted networks</li>
+                <li>Start monitoring automatically</li>
+            </ul>
+        </div>
+
+        <div class="card" id="features">
+            <h2>✨ Features</h2>
+            <div class="feature-grid">
+                <div class="feature">
+                    <h4>🔍 Real-time Monitoring</h4>
+                    <p>Monitors systemd journal and log files for attack patterns</p>
+                </div>
+                <div class="feature">
+                    <h4>🚫 Automatic Blocking</h4>
+                    <p>Blocks IPs using nftables with configurable timeouts</p>
+                </div>
+                <div class="feature">
+                    <h4>🗄️ Centralized Database</h4>
+                    <p>PostgreSQL for threat sharing across all servers</p>
+                </div>
+                <div class="feature">
+                    <h4>⚡ Multi-threaded</h4>
+                    <p>Async architecture with queue-based pipeline</p>
+                </div>
+                <div class="feature">
+                    <h4>🎯 Configurable Detectors</h4>
+                    <p>SSH, mail, web, DNS - add your own patterns</p>
+                </div>
+                <div class="feature">
+                    <h4>🛡️ Trusted Networks</h4>
+                    <p>Never-block CIDR filtering for management networks</p>
+                </div>
+            </div>
+
+            <h3>The NAFTA Effect</h3>
+            <div class="alert info">
+                <strong>"An attack on one is an attack on all."</strong>
+                <p>When any server blocks an IP, it's shared via database with all servers. An attacker brute-forcing SSH on your mail server gets instantly blocked everywhere.</p>
+            </div>
+        </div>
+
+        <div class="card" id="config">
+            <h2>⚙️ Configuration</h2>
+            <h3>Main Configuration</h3>
+            <p>Edit <code>/usr/local/etc/badips.conf</code>:</p>
+            <div class="install-box">[global]
+log_level = debug
+block_duration = 691200    # 8 days
+never_block_cidrs = 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16</div>
+
+            <h3>Database Configuration</h3>
+            <p>Edit <code>/usr/local/etc/badips.d/database.conf</code>:</p>
+            <div class="install-box">[global]
+db_host = 10.10.0.116
+db_port = 5432
+db_name = bad_ips
+db_user = bad_ips_admin
+db_password = your_password</div>
+
+            <h3>Detector Configuration</h3>
+            <p>Example SSH detector (<code>10-sshd.conf</code>):</p>
+            <div class="install-box">[detector:sshd]
+units = ssh.service, sshd.service
+pattern1 = Failed password for invalid user
+pattern2 = Failed password for root</div>
+            <p><strong><a href="configuration.html">→ Full Configuration Reference</a></strong></p>
+        </div>
+
+        <div class="card">
+            <h2>📚 Documentation</h2>
+            <ul>
+                <li><strong>Man Page:</strong> <code>man bad_ips</code> (after installation)</li>
+                <li><strong>Configuration:</strong> <a href="configuration.html">Full reference</a></li>
+                <li><strong>GitHub:</strong> <a href="https://github.com/permittivity2/bad-ips">Repository</a></li>
+            </ul>
+
+            <h3>Useful Commands</h3>
+            <div class="install-box">systemctl status bad_ips
+systemctl reload bad_ips
+journalctl -u bad_ips.service -f
+sudo nft list set inet filter badipv4
+bad_ips --test-config</div>
+        </div>
+
+        <div class="card" id="support">
+            <h2>🤝 Support</h2>
+            <ul>
+                <li><strong>Issues:</strong> <a href="https://github.com/permittivity2/bad-ips/issues">GitHub Issues</a></li>
+                <li><strong>Email:</strong> gardner@homelab</li>
+            </ul>
+        </div>
+
+        <div class="alert">
+            <strong>⚠️ Security Notes:</strong>
+            <ul style="margin-top:10px">
+                <li>Configure <code>never_block_cidrs</code> with trusted networks</li>
+                <li>Test with <code>--dry-run</code> before production</li>
+                <li>Maintain backup access (console, OOB)</li>
+            </ul>
+        </div>
+    </div>
+
+    <footer>
+        <p>Bad IPs v2.0.3 - Silver Linings, LLC</p>
+        <p><a href="https://projects.thedude.vip/apt/">APT Repo</a> | <a href="https://github.com/permittivity2/bad-ips">GitHub</a></p>
+    </footer>
+</body>
+</html>
