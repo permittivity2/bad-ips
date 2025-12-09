@@ -831,15 +831,29 @@ sub central_db_sync_thread {
         # Batch INSERT to PostgreSQL
         eval {
             for my $item (@batch) {
+                my $now = time();
+                my $expires = $now + $self->{conf}->{blocking_time};
+
                 my $sth = $thread_dbh->prepare(
-                    "SELECT record_blocked_ip(?, ?, ?, NOW() + INTERVAL '? seconds', ?)"
+                    "INSERT INTO jailed_ips
+                     (ip, originating_server, originating_service, detector_name,
+                      matched_log_line, first_blocked_at, last_seen_at, expires_at, block_count)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+                     ON CONFLICT (ip, originating_server)
+                     DO UPDATE SET
+                         last_seen_at = EXCLUDED.last_seen_at,
+                         expires_at = EXCLUDED.expires_at,
+                         block_count = jailed_ips.block_count + 1"
                 );
                 $sth->execute(
-                    $hostname,
                     $item->{ip},
+                    $hostname,
+                    $item->{source},
                     $item->{detector},
-                    $self->{conf}->{blocking_time},
-                    $item->{log_line}
+                    $item->{log_line},
+                    $now,
+                    $now,
+                    $expires
                 );
             }
         };
@@ -914,20 +928,20 @@ sub pull_global_blocks_thread {
         eval {
             my $hostname = hostname();
             my $sth = $thread_dbh->prepare(
-                "SELECT subnet, hostname, service_name, detector_name
-                 FROM active_blocks
-                 WHERE hostname != ?
-                 AND detected_at > TO_TIMESTAMP(?)"
+                "SELECT ip, originating_server, originating_service, detector_name
+                 FROM jailed_ips
+                 WHERE originating_server != ?
+                 AND last_seen_at > ?"
             );
-            $sth->execute($hostname, $last_check_time);
+            $sth->execute($hostname, int($last_check_time));
 
             while (my $row = $sth->fetchrow_hashref) {
                 $new_blocks_found++;
 
                 # Enqueue for blocking
                 $ips_to_block_queue->enqueue({
-                    ip => $row->{subnet},
-                    source => "central_db:$row->{hostname}",
+                    ip => $row->{ip},
+                    source => "central_db:$row->{originating_server}",
                     detector => $row->{detector_name} || 'global_sync',
                     line => undef,
                 });
