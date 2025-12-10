@@ -868,6 +868,25 @@ auto_mode = 1
 
 # Cleanup intervals
 cleanup_every_seconds = 3600
+
+# Initial lookback -> how far to initally look back at journal
+#                     Files are always read in entirety on initial loading
+#                     Default: 300 seconds (5 minutes) to minimize memory usage
+initial_journal_lookback = 300
+
+# Sleep time: number of seconds between looking at journalct or log files
+#             Default: 2 seconds (can increase to 10+ on low-RAM systems)
+sleep_time = 2
+
+
+# central_db_batch_size: the max batch size to insert into central database of new IPs blocked
+#	As new IPs are found, after they have been blocked, each IP is added to a queue (sync_to_central_db_queue)
+#   This queue is constantly monitored.  A collection of up to <central_db_batch_size> entries in the queue at a time
+#   will be saved to the central database.
+#   This helps keep the database from getting overwhelmed with inserts all the time as there can be an unlimitted
+#   number of servers sending inserts.
+#   Default: 1000 (code default), but conservative 50 for installer
+central_db_batch_size = 50
 CONFEOF
     
     echo -e "${GREEN}✓${NC} Configuration saved to $BADIPS_CONF"

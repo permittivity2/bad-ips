@@ -106,7 +106,8 @@ rsync -a \
   "$SCRIPT_DIR/" "$BUILD_DIR/"
 
 # Build package
-dpkg-deb --build "$BUILD_DIR" "$OUTPUT_DIR/bad-ips_${VERSION}_all.deb"
+mkdir -p "$OUTPUT_DIR/pool/main"
+dpkg-deb --build "$BUILD_DIR" "$OUTPUT_DIR/pool/main/bad-ips_${VERSION}_all.deb"
 
 # Cleanup
 rm -rf "$BUILD_DIR"
@@ -115,7 +116,7 @@ echo ""
 echo "============================================"
 echo "✓ Package built successfully!"
 echo "============================================"
-ls -lh "$OUTPUT_DIR/bad-ips_${VERSION}_all.deb"
+ls -lh "$OUTPUT_DIR/pool/main/bad-ips_${VERSION}_all.deb"
 echo ""
 echo "Next steps:"
 echo "  1. Update apt repo:    cd ~/apt-repo && ./update-repo.sh"
