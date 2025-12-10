@@ -118,9 +118,34 @@ echo "============================================"
 ls -lh "$OUTPUT_DIR/bad-ips_${VERSION}_all.deb"
 echo ""
 echo "Next steps:"
-echo "  1. Test the package"
-echo "  2. Update apt repo:    cd ~/apt-repo && ./update-repo.sh"
-echo "  3. Deploy to proxy:    rsync -av ~/apt-repo/ proxy:/var/www/projects.thedude.vip/apt/"
-echo "  4. Deploy website:     rsync -av website/ proxy:/var/www/projects.thedude.vip/bad-ips/"
-echo "  5. Commit changes:     git add -A && git commit -m 'Release v$VERSION' && git push"
+echo "  1. Update apt repo:    cd ~/apt-repo && ./update-repo.sh"
+echo "  2. Deploy to proxy:    rsync -av ~/apt-repo/ proxy:/var/www/projects.thedude.vip/apt/ --exclude='.git' --exclude='update-repo.sh'"
+echo "  3. Deploy website:     rsync -av $SCRIPT_DIR/website/ proxy:/var/www/projects.thedude.vip/bad-ips/"
+echo "  4. Commit changes:     git add -A && git commit -m 'Release v$VERSION' && git push"
+echo ""
+
+# Offer to automate deployment
+read -p "Would you like to automatically deploy to proxy? [y/N] " -n 1 -r
+echo
+if [[ $REPLY =~ ^[Yy]$ ]]; then
+    echo ""
+    echo "Updating apt repository..."
+    cd ~/apt-repo && ./update-repo.sh
+
+    echo ""
+    echo "Deploying apt repository to proxy..."
+    rsync -av ~/apt-repo/ proxy:/var/www/projects.thedude.vip/apt/ --exclude='.git' --exclude='update-repo.sh'
+
+    echo ""
+    echo "Deploying website to proxy..."
+    rsync -av "$SCRIPT_DIR/website/" proxy:/var/www/projects.thedude.vip/bad-ips/
+
+    echo ""
+    echo "✓ Deployment complete!"
+    echo ""
+    echo "Final step:"
+    echo "  Commit changes:     git add -A && git commit -m 'Release v$VERSION' && git push"
+else
+    echo "Deployment skipped. Use the commands above to deploy manually."
+fi
 echo ""
