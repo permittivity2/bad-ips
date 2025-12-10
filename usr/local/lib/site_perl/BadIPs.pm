@@ -27,7 +27,7 @@ use Thread::Queue;
 $Data::Dumper::Sortkeys = 1;
 $Data::Dumper::Indent   = 1;
 
-our $VERSION = '1.2.0';  # Phase 10: Threading + PostgreSQL
+our $VERSION = '2.0.21';  # Phase 10: Threading + PostgreSQL
 
 # Service -> how to read + patterns (moved to conf.d, kept empty here)
 my %DETECTORS = ();
