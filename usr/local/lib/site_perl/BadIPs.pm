@@ -814,7 +814,8 @@ sub central_db_sync_thread {
                 $sync_to_central_db_queue->enqueue($_) for @batch;
                 sleep 10;  # Back off
             } else {
-                $log->info("Synced " . scalar(@batch) . " IP" . (scalar(@batch) == 1 ? '' : 's') . " to central DB");
+                my @ips = map { $_->{ip} } @batch;
+                $log->info("Synced " . scalar(@batch) . " IP" . (scalar(@batch) == 1 ? '' : 's') . " to central DB: " . join(", ", @ips));  
                 $log->debug("Synced IPs to central DB:\n" . Dumper(\@batch));
             }
         }
@@ -1013,6 +1014,8 @@ sub run_hunter {
     for my $method_name ( qw/nft_blocker_thread central_db_sync_thread pull_global_blocks_thread/ ) {
         $log->info("Starting $method_name");
         push @{$self->{threads}}, threads->create(sub { $self->$method_name() });
+        # my $thr = threads->create(\&{$method_name}, $self);
+        # push @{$self->{threads}}, $thr;
     }
     $log->info("All worker threads started");
 
@@ -1223,48 +1226,95 @@ sub _read_journals {
     return $entries;
 }
 
+sub _get_journal_byte_count {
+    my ($self, %args) = @_;
+    my $unit = $args{unit} // '';
+    my $since_epoch = $args{since_epoch} // time();
+    my $until_epoch = $args{until_epoch} // time();
+
+    my $cmd = qq(journalctl --unit=$unit --since=\@$since_epoch --until=\@$until_epoch --no-pager -o json | wc -c);
+    $log->debug("Executing command to get byte count: $cmd");
+    my $output = `$cmd 2>/dev/null`;
+    chomp $output;
+    if ($? != 0) {
+        $log->warn("Failed to get journal byte count for unit $unit");
+        return 0;
+    }
+    return int($output);
+}
+
+sub _get_journal_lines {
+    my ($self, %args) = @_;
+    my $unit = $args{unit} // '';
+    my $since_epoch = $args{since_epoch} // time();
+    my $until_epoch = $args{until_epoch} // time();
+    
+    my @lines = ();
+
+    my $cmd = "journalctl --unit=$unit --since=\@$since_epoch --until=\@$until_epoch --no-pager -o json";
+
+    open(my $fh, "-|", $cmd) or do {
+        $log->warn("Failed to open journalctl command for unit $unit: $!");
+        return \@lines;
+    };
+
+    while (my $line = <$fh>) {
+        chomp $line;
+
+        next unless $line =~ /\S/;  # skip empty
+
+        next unless ( $self->has_ipv4($line) or $self->has_ipv6($line) );  # skip if no IPs
+
+        # Now decode the JSON and process it
+        my $entry = eval { decode_json($line) };
+        if ($@) {
+            warn "JSON decode error: $@ -- line was: $line";
+            $log->warn("Failed to parse journalctl JSON line: $@");
+            next;
+        }
+        my $line_hash = {};
+        $line_hash->{MESSAGE} = $entry->{MESSAGE} // '';
+
+        push @lines, $line_hash if ( $self->has_ipv4($line_hash->{MESSAGE}) or $self->has_ipv6($line_hash->{MESSAGE}) );
+    }
+
+    close($fh);
+
+    return \@lines;
+
+}
+
 sub _read_journal_unit {
     my ($self, $unit, $read_journal_since) = @_;
     $read_journal_since = int($read_journal_since); # Make sure it's an integer
     my $seconds_ago = time() - $read_journal_since;
 
-    my $entries = {};
-    my $cmd = qq(journalctl --since=\@$read_journal_since --unit=$unit --no-pager -o json);
-    $log->debug("Executing command: $cmd");
-    my $lines = `$cmd 2>/dev/null`;
-    $lines =~ s/\n/,/g;
-    $lines =~ s/,$//;
-    # add square brackets to make it a valid JSON array
-    $lines = "[$lines]";
-    my $json = eval { decode_json($lines) };
-    if ($@) {
-        $log->warn("Failed to parse journalctl JSON output for unit $unit: $@");
-        $log->debug("Dumper of output: " . Dumper($lines));
-        return {};
+    my $entries = {};    
+    my $byte_count;
+    if ( $log->is_debug() ) {
+        $byte_count = $self->_get_journal_byte_count( unit => $unit, since_epoch => $read_journal_since );
+        # convert bytes to human readable
+        my $human_readable = $byte_count < 1024 ? "$byte_count B" :
+                            $byte_count < 1048576 ? sprintf("%.2f KB", $byte_count / 1024) :
+                            $byte_count < 1073741824 ? sprintf("%.2f MB", $byte_count / 1048576) :
+                            sprintf("%.2f GB", $byte_count / 1073741824);
+        $log->debug("Journal byte count for unit $unit since epoch $read_journal_since: $human_readable");
     }
-    undef $lines; # Delete $lines to free memory, hopefully
-    my @lines = ref($json) eq 'ARRAY' ? @$json : ();
-    undef $json; # Delete $json to free memory, hopefully
+
+    my $lines = $self->_get_journal_lines( unit => $unit, since_epoch => $read_journal_since, until_epoch => time() );
+    my @lines_arr = ref($lines) eq 'ARRAY' ? @$lines : ();
+    $log->debug("Total journal entries retrieved for unit $unit: " . scalar(@lines_arr));
+    my %lines_hash = ();
     my $counter = 1;
-    my %lines = ();
-    for my $entry (@lines) {
-        $counter++;
-        my $msg = $entry->{MESSAGE} || '';
-        $lines{$msg} = $counter++;
+    for my $line (@lines_arr) {
+        my $msg = $line->{MESSAGE} || '';
+        $lines_hash{$msg} = $counter++;
     }
-    # %lines = map { $lines{$_} } grep { $self->has_ipv4($_) or $self->has_ipv6($_) } keys %lines;
-    $log->debug("Total journal entries retrieved for unit $unit: " . scalar(keys %lines));
-    for my $line (keys %lines) {
-        unless ( $self->has_ipv4($line) or $self->has_ipv6($line) ) {
-            delete $lines{$line};
-        }
-    }
-    $log->debug("Filtered journal entries with IPs for unit $unit: " . scalar(keys %lines));
-    $log->debug("Sample filtered entry for unit $unit: " . (keys %lines ? (keys %lines)[0] : 'none'));
+    $log->debug("Filtered journal entries with IPs for unit $unit: " . scalar(keys %lines_hash));
 
     # Previous code looked for a threadid, but journalctl does not provide that, we will fake it with a counter set above
-    for my $msg (keys %lines) {
-        my $threadid = $lines{$msg} || "no-thread";
+    for my $msg (keys %lines_hash) {
+        my $threadid = $lines_hash{$msg} || 'unknown';
         $threadid = "$unit:$threadid";
         $entries->{$threadid} = defined $entries->{$threadid} ? "$entries->{$threadid}|$msg" : $msg;
     }
@@ -1603,4 +1653,5 @@ sub _log {
 }
 
 1;
+
 
