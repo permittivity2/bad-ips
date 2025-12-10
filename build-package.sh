@@ -20,7 +20,8 @@ if [ -z "$1" ]; then
     echo "  3. Update version in README.md"
     echo "  4. Update version in website/index.html"
     echo "  5. Update version in website/configuration.html"
-    echo "  6. Build the package"
+    echo "  6. Update version in BadIPs.pm"
+    echo "  7. Build the package"
     echo ""
     CURRENT_VERSION=$(grep "^Version:" "$SCRIPT_DIR/DEBIAN/control" | awk '{print $2}')
     echo "Current version: $CURRENT_VERSION"
@@ -67,13 +68,18 @@ echo "Updating website/configuration.html..."
 sed -i "s/Bad IPs v[0-9.]* - Silver Linings/Bad IPs v$VERSION - Silver Linings/" "$SCRIPT_DIR/website/configuration.html"
 echo "✓ website/configuration.html updated"
 
+# Update version in BadIPs.pm
+echo "Updating BadIPs.pm..."
+sed -i "s/^our \$VERSION = '[0-9.]*';/our \$VERSION = '$VERSION';/" "$SCRIPT_DIR/usr/local/lib/site_perl/BadIPs.pm"
+echo "✓ BadIPs.pm updated"
+
 echo ""
 echo "Version updates complete!"
 echo ""
 
 # Show what changed
 echo "Git status:"
-git -C "$SCRIPT_DIR" status --short | grep -E "(DEBIAN/control|man8/bad_ips.8|README.md|website/)" || echo "  No changes detected"
+git -C "$SCRIPT_DIR" status --short | grep -E "(DEBIAN/control|man8/bad_ips.8|README.md|website/|BadIPs.pm)" || echo "  No changes detected"
 echo ""
 
 # Confirm before building
