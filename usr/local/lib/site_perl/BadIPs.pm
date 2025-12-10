@@ -27,7 +27,7 @@ use Thread::Queue;
 $Data::Dumper::Sortkeys = 1;
 $Data::Dumper::Indent   = 1;
 
-our $VERSION = '2.0.21';  # Phase 10: Threading + PostgreSQL
+our $VERSION = '2.0.22';
 
 # Service -> how to read + patterns (moved to conf.d, kept empty here)
 my %DETECTORS = ();
@@ -216,6 +216,27 @@ sub _load_config {
     $self->{conf}->{db_user}                                //= 'bad_ips_hunter';
     $self->{conf}->{db_password}                            //= '';
     $self->{conf}->{db_ssl_mode}                            //= 'disable';
+
+    my $confs;
+    # Take all the keys and values of accum and self->con and put them in confs
+    my @accums_keys = qw/
+        conf_main conf_dir
+        blocking_time sleep_time heartbeat extra_time initial_journal_lookback
+        journal_units bad_conn_patterns never_block_cidrs always_block_cidrs
+        db_dir db_file log_level nft_table nft_family_table nft_set
+        file_sources max_file_tail_lines auto_mode
+        ips_to_block_queue_max sync_to_central_db_queue_max
+        sync_to_central_db_queue_critical_time central_db_batch_size
+        central_db_batch_timeout pull_min_interval pull_step_interval
+        pull_initial_interval pull_max_interval failover_log failover_enabled
+        graceful_shutdown_timeout
+        db_type db_host db_port db_name db_user db_password db_ssl_mode/;
+    for my $k (@accums_keys) {
+        $confs->{$k} = exists $self->{conf}->{$k} ? $self->{conf}->{$k} : '';
+        $confs->{$k} = exists $accum{$k} ? $accum{$k} : '';
+    }
+
+    return $confs;
 }
 
 # Initialize thread-safe queues
@@ -542,7 +563,7 @@ sub _report_config {
 sub test_config {
     my ($self) = @_;
     # Re-run discovery + compile to be sure
-    $self->_load_config();
+    my $all_confs = $self->_load_config();
     $self->{detectors} = $self->_load_detectors_from_confdir();
     $self->_auto_discover_sources();
     my $report = $self->_report_config();
@@ -1002,6 +1023,7 @@ sub _shutdown_gracefully {
 sub run_hunter {
     my ($self) = @_;
     $log->info("Starting main thread to find and block bad IPs");
+    my $start_time = time();
 
     # Setup signal handlers for graceful shutdown
     $SIG{QUIT} = sub { $self->_shutdown_gracefully("SIGQUIT"); };
@@ -1011,11 +1033,12 @@ sub run_hunter {
 
     # Start worker threads
     $log->info("Starting worker threads...");
+    my $confs = $self->_load_config();
     for my $method_name ( qw/nft_blocker_thread central_db_sync_thread pull_global_blocks_thread/ ) {
         $log->info("Starting $method_name");
-        push @{$self->{threads}}, threads->create(sub { $self->$method_name() });
-        # my $thr = threads->create(\&{$method_name}, $self);
-        # push @{$self->{threads}}, $thr;
+        # push @{$self->{threads}}, threads->create(sub { $self->$method_name() });
+        my $thr = threads->create(\&{$method_name}, $self);
+        push @{$self->{threads}}, $thr;
     }
     $log->info("All worker threads started");
 
@@ -1086,6 +1109,15 @@ sub run_hunter {
     $goodbye_msg .= $platitudes[$random_index];
     $log->info($goodbye_msg);
 
+    my $end_time = time();
+    my $duration = $end_time - $start_time;
+    # make a pretty print human readable duration
+    my $hours = int($duration / 3600);
+    my $minutes = int(($duration % 3600) / 60);
+    my $seconds = $duration % 60;
+    $log->info("Total runtime: ${hours}h ${minutes}m ${seconds}s");
+
+    $log->info("The End.");
     return 1;
 }
 
@@ -1631,9 +1663,10 @@ sub _refresh_static_nftables_sets {
 # -------------------- signal handlers --------------------
 sub _reload_config_signal {
     my ($self) = @_;
+    my $confs;
     eval {
         $log->info("SIGHUP received: reloading configuration");
-        $self->_load_config();
+        $confs = $self->_load_config();
         $self->{detectors} = $self->_load_detectors_from_confdir();
         $self->_auto_discover_sources();
         $self->_refresh_static_nftables_sets();
@@ -1642,6 +1675,8 @@ sub _reload_config_signal {
     if ($@) {
         $log->info("Failed to reload config on SIGHUP: $@");
     }
+
+    return $confs;
 }
 
 # -------------------- tiny logger shim --------------------
