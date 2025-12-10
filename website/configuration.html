@@ -159,25 +159,51 @@
                     <td>How often to clean expired blocks</td>
                     <td>3600</td>
                 </tr>
+                <tr>
+                    <td><code>sleep_time</code></td>
+                    <td>Seconds between log scans</td>
+                    <td>2</td>
+                </tr>
+                <tr>
+                    <td><code>initial_journal_lookback</code></td>
+                    <td>Initial journal history to scan (seconds)</td>
+                    <td>300 (5 minutes)</td>
+                </tr>
+                <tr>
+                    <td><code>heartbeat</code></td>
+                    <td>Status logging interval (seconds)</td>
+                    <td>60</td>
+                </tr>
+                <tr>
+                    <td><code>central_db_batch_size</code></td>
+                    <td>Max batch size for PostgreSQL inserts</td>
+                    <td>1000</td>
+                </tr>
             </table>
 
             <h3>Example Configuration</h3>
             <div class="code-block">[global]
 # Logging
-log_level = debug
+log_level = info
 
 # Blocking duration (8 days)
 block_duration = 691200
 
 # Never block these networks (CRITICAL!)
-never_block_cidrs = 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,23.116.91.65/29
+never_block_cidrs = 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8
 
 # Always block these networks (optional)
 always_block_cidrs = 198.51.100.0/24,203.0.113.0/24
 
-# Performance
+# Performance tuning
 auto_mode = 1
-cleanup_every_seconds = 3600</div>
+cleanup_every_seconds = 3600
+sleep_time = 2
+initial_journal_lookback = 300
+heartbeat = 60
+
+# Database batch settings
+central_db_batch_size = 1000</div>
 
             <div class="alert">
                 <strong>⚠️ Critical:</strong> Always configure <code>never_block_cidrs</code> with your management networks to prevent lockouts!
@@ -448,7 +474,7 @@ sudo nft list set inet filter badipv4</div>
 
     <footer>
         <p><a href="index.html">← Back to Main</a></p>
-        <p>Bad IPs v2.0.17 - Silver Linings, LLC</p>
+        <p>Bad IPs v2.0.18 - Silver Linings, LLC</p>
     </footer>
 </body>
 </html>
