@@ -18,6 +18,9 @@ use Net::CIDR qw(cidrlookup);
 use Sys::Hostname qw(hostname);
 use File::ReadBackwards;
 use Data::Dumper;
+use LWP::UserAgent;
+use File::Path qw(mkpath);
+use Digest::MD5 qw(md5_hex);
 
 # Threading support
 use threads;
@@ -27,7 +30,7 @@ use Thread::Queue;
 $Data::Dumper::Sortkeys = 1;
 $Data::Dumper::Indent   = 1;
 
-our $VERSION = '2.0.28';
+our $VERSION = '2.0.29';
 
 # Service -> how to read + patterns (moved to conf.d, kept empty here)
 my %DETECTORS = ();
@@ -127,7 +130,7 @@ sub new {
     $self->{detectors} = $self->_load_detectors_from_confdir();
     $self->_auto_discover_sources();    # compiles patterns + sources
     # $self->_init_db();                  # Local SQLite
-    $self->_init_central_db();          # Central PostgreSQL
+    # $self->_init_central_db();          # Central PostgreSQL
     $self->_initial_load_blocked_ips();
     $self->_refresh_static_nftables_sets();  # Populate static sets at startup
     return $self;
@@ -192,6 +195,12 @@ sub _load_config {
     $accum{always_block_cidrs} = _csv_to_array($accum{always_block_cidrs});
     $accum{file_sources}       = _csv_to_array($accum{file_sources});
 
+    # Public blocklist URLs
+    $accum{public_blocklist_urls}    //= '';
+    $accum{public_blocklist_refresh} //= 900;   # 15 minutes
+    $accum{public_blocklist_urls} = _csv_to_array($accum{public_blocklist_urls});
+
+
     $self->{conf} = \%accum;
 
     # Phase 10: Add threading configuration defaults
@@ -230,7 +239,8 @@ sub _load_config {
         central_db_batch_timeout pull_min_interval pull_step_interval
         pull_initial_interval pull_max_interval failover_log failover_enabled
         graceful_shutdown_timeout
-        db_type db_host db_port db_name db_user db_password db_ssl_mode/;
+        db_type db_host db_port db_name db_user db_password db_ssl_mode
+        public_blocklist_urls public_blocklist_refresh/;
     for my $k (@accums_keys) {
         $confs->{$k} = exists $self->{conf}->{$k} ? $self->{conf}->{$k} : '';
         $confs->{$k} = exists $accum{$k} ? $accum{$k} : '';
@@ -758,7 +768,33 @@ sub nft_blocker_thread {
         }
 
         # Execute nft command
-        if (system($cmd) == 0) {
+        # if (system($cmd) == 0) {
+        #     my $exp = time() + $ttl;
+        #     $self->{blocked}{$ip} = $exp;
+
+        #     $log->info("Jailed $ip for ${ttl}s (source: $source, detector: $detector)");
+
+        #     # Enqueue directly to sync_to_central_db_queue
+        #     my $q_entry = {
+        #         ip => $ip,
+        #         expires_at => $exp,
+        #         source => $source,
+        #         detector => $detector,
+        #         log_line => $log_line,
+        #     };
+        #     $sync_to_central_db_queue->enqueue($q_entry);
+        #     $log->debug("Enqueued $ip to sync_to_central_db_queue");
+        #     $log->debug("queue contents:\n" . Dumper($q_entry));
+        # } else {
+        #     $log->info("nft add failed for $ip: $!");
+        # }
+
+        eval {
+            my $nft_output = qx($cmd 2>&1);
+        };
+        if ($@) {
+            $log->info("nft add failed.  This may not be critical depending on the error.  IP: $ip, Error: $@");
+        } else {
             my $exp = time() + $ttl;
             $self->{blocked}{$ip} = $exp;
 
@@ -775,8 +811,6 @@ sub nft_blocker_thread {
             $sync_to_central_db_queue->enqueue($q_entry);
             $log->debug("Enqueued $ip to sync_to_central_db_queue");
             $log->debug("queue contents:\n" . Dumper($q_entry));
-        } else {
-            $log->info("nft add failed for $ip: $!");
         }
     }
 
@@ -1034,9 +1068,14 @@ sub run_hunter {
     # Start worker threads
     $log->info("Starting worker threads...");
     my $confs = $self->_load_config();
-    for my $method_name ( qw/nft_blocker_thread central_db_sync_thread pull_global_blocks_thread/ ) {
+    my @method_names = qw/
+        nft_blocker_thread
+        central_db_sync_thread
+        pull_global_blocks_thread
+        public_blocklist_thread
+    /;
+    for my $method_name ( @method_names ) {
         $log->info("Starting $method_name");
-        # push @{$self->{threads}}, threads->create(sub { $self->$method_name() });
         my $thr = threads->create(\&{$method_name}, $self);
         push @{$self->{threads}}, $thr;
     }
@@ -1120,6 +1159,225 @@ sub run_hunter {
     $log->info("The End.");
     return 1;
 }
+
+=header2 public_blocklist_thread
+
+    Description:
+        Thread to periodically fetch public blocklists from configured URLs,
+        extract IP addresses, and enqueue them for blocking.
+    
+=cut
+sub public_blocklist_thread {
+    my ($self) = @_;
+    $log->info("public_blocklist_thread started");
+
+    my $urls          = $self->{conf}->{public_blocklist_urls};
+    my $interval      = $self->{conf}->{public_blocklist_refresh} || 3600;
+    my $use_cache     = $self->{conf}->{public_blocklist_use_cache} // 1;
+    my $cache_path    = $self->{conf}->{public_blocklist_cache_path} || '/var/cache/badips';
+
+    # Ensure cache directory exists
+    if ($use_cache && ! -d $cache_path) {
+        eval { make_path($cache_path) };
+        if ($@) {
+            $log->warn("Failed to create cache dir $cache_path: $@");
+            $use_cache = 0;
+        }
+    }
+
+    unless (@$urls) {
+        $log->info("No public blocklist URLs configured; exiting public_blocklist_thread");
+        return;
+    }
+
+    my $ua = LWP::UserAgent->new(
+        timeout  => 10,
+        agent    => "BadIPs/2.0",
+        ssl_opts => { verify_hostname => 1 },
+        max_size => 5_000_000,
+    );
+
+    while (!$shutdown) {
+
+        URL:
+        for my $url (@$urls) {
+            next URL unless $url;
+
+            $log->info("Processing public blocklist source: $url");
+
+            # Hash used to generate cache file name
+            my $url_md5 = md5_hex($url);
+
+            # Cache files:
+            my $cache_file     = "$cache_path/blocklist_$url_md5.txt";
+            my $etag_file      = "$cache_path/blocklist_$url_md5.etag";
+            my $lm_file        = "$cache_path/blocklist_$url_md5.lastmod";
+
+            my ($etag, $lastmod);
+            # Read ETag from cache
+            if ($use_cache && -f $etag_file) {
+                open my $fh, '<', $etag_file or $log->warn("Failed to read $etag_file: $!");
+                local $/;
+                $etag = <$fh>;
+            }
+
+            # Read Last-Modified from cache
+            if ($use_cache && -f $lm_file) {
+                open my $fh, '<', $lm_file or $log->warn("Failed to read $lm_file: $!");
+                local $/;
+                $lastmod = <$fh>;
+            }
+            chomp($etag)    if $etag;
+            chomp($lastmod) if $lastmod;
+
+            my $content;
+
+            # -------------------------
+            # 1) Check cache age
+            # -------------------------
+            my $cache_is_fresh = 0;
+            if ($use_cache && -f $cache_file) {
+                my $mtime = (stat($cache_file))[9] || 0;
+                my $age   = time() - $mtime;
+
+                if ($age < $interval) {
+                    $cache_is_fresh = 1;
+                    $log->info("Using fresh cached blocklist: $cache_file (age=${age}s)");
+                } else {
+                    $log->info("Cache stale (age ${age}s), performing conditional HTTP request");
+                }
+            }
+
+            # Read fresh cache if still valid
+            if ($cache_is_fresh) {
+                $content = do {
+                    local $/;
+                    open my $fh, '<', $cache_file or do {
+                        $log->warn("Could not read fresh cache file $cache_file: $!");
+                        undef;
+                    };
+                    <$fh>;
+                };
+            }
+
+            # -------------------------
+            # 2) Cache not fresh → Conditional GET
+            # -------------------------
+            if (!$content) {
+                my %headers;
+
+                # Send ETag + If-Modified-Since if available
+                $headers{'If-None-Match'}      = $etag    if defined $etag && length $etag;
+                $headers{'If-Modified-Since'}  = $lastmod if defined $lastmod && length $lastmod;
+
+                $log->info("Sending conditional GET to $url with headers: " . Dumper(\%headers));
+
+                my $response = $ua->get($url, %headers);
+
+                # -------------------------
+                # 304 Not Modified → Use cache
+                # -------------------------
+                if ($response->code == 304) {
+                    $log->info("304 Not Modified received — using cached blocklist for $url");
+
+                    $content = do {
+                        local $/;
+                        open my $fh, '<', $cache_file or do {
+                            $log->warn("Cache missing but server sent 304; skipping URL");
+                            next URL;
+                        };
+                        <$fh>;
+                    };
+                }
+                # -------------------------
+                # 200 OK → Update cache
+                # -------------------------
+                elsif ($response->is_success) {
+                    $content = $response->decoded_content;
+
+                    if ($use_cache) {
+                        # Write cache body
+                        if (open my $fh, '>', $cache_file) {
+                            print $fh $content;
+                            close $fh;
+                        }
+
+                        # Write ETag
+                        if (my $new_etag = $response->header('ETag')) {
+                            open my $efh, '>', $etag_file;
+                            print $efh $new_etag;
+                            close $efh;
+                            $log->info("Saved ETag for $url: $new_etag");
+                        }
+
+                        # Write Last-Modified
+                        if (my $new_lm = $response->header('Last-Modified')) {
+                            open my $lfh, '>', $lm_file;
+                            print $lfh $new_lm;
+                            close $lfh;
+                            $log->info("Saved Last-Modified for $url: $new_lm");
+                        }
+
+                        $log->info("Updated blocklist cache for $url");
+                    }
+                }
+                # -------------------------
+                # Fetch error → fallback to stale cache
+                # -------------------------
+                else {
+                    $log->warn("Failed to fetch $url: " . $response->status_line);
+
+                    if ($use_cache && -f $cache_file) {
+                        $log->warn("Using stale cache due to error");
+                        $content = do {
+                            local $/;
+                            open my $fh, '<', $cache_file;
+                            <$fh>;
+                        };
+                    } else {
+                        next URL; # No cache, can't process
+                    }
+                }
+            }
+
+            # -------------------------
+            # 3) Parse IPs from content
+            # -------------------------
+            my %seen;
+            while ($content =~ /($RE{net}{IPv4})(?:\/(\d{1,2}))?/g) {
+                my $ip   = $1;
+                my $mask = $2;
+                my $entry = defined $mask ? "$ip/$mask" : $ip;
+                $seen{$entry}++;
+            }
+
+            $log->info("Blocklist ($url) contains " . scalar(keys %seen) . " entries");
+
+            # -------------------------
+            # 4) Enqueue IPs for blocking
+            # -------------------------
+            for my $entry (keys %seen) {
+                next if $self->_is_never_block_ip($entry);
+
+                $ips_to_block_queue->enqueue({
+                    ip       => $entry,
+                    source   => "public_blocklist",
+                    detector => $url,
+                    line     => undef,
+                });
+            }
+        }
+
+        # sleep until next refresh
+        for (1 .. $interval) {
+            last if $shutdown;
+            sleep 1;
+        }
+    }
+
+    $log->info("public_blocklist_thread shutting down");
+}
+
 
 sub _drain_queues {
     my ($self) = @_;
@@ -1688,5 +1946,4 @@ sub _log {
 }
 
 1;
-
 
