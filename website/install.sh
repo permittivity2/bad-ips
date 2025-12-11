@@ -589,7 +589,7 @@ configure_database() {
                     echo "  PGPASSWORD='yourpassword' psql -h $DB_HOST -p $DB_PORT -U $DB_USER -d $DB_NAME <<'SQL'"
                     echo "  CREATE TABLE IF NOT EXISTS jailed_ips ("
                     echo "      id SERIAL PRIMARY KEY,"
-                    echo "      ip VARCHAR(45) NOT NULL,"
+                    echo "      ip inet NOT NULL,"
                     echo "      originating_server VARCHAR(255) NOT NULL,"
                     echo "      originating_service VARCHAR(255),"
                     echo "      detector_name VARCHAR(255),"
@@ -613,7 +613,7 @@ configure_database() {
                     if PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" > "$tmpout" 2>&1 <<'SQL'
 CREATE TABLE IF NOT EXISTS jailed_ips (
     id SERIAL PRIMARY KEY,
-    ip VARCHAR(45) NOT NULL,
+    ip inet NOT NULL,
     originating_server VARCHAR(255) NOT NULL,
     originating_service VARCHAR(255),
     detector_name VARCHAR(255),
