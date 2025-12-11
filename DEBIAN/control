@@ -1,9 +1,9 @@
 Package: bad-ips
-Version: 2.0.28
+Version: 2.0.29
 Section: admin
 Priority: optional
 Architecture: all
-Depends: perl, nftables, postgresql-client, libconfig-tiny-perl, libdbi-perl, libdbd-pg-perl, libjson-perl, libnet-cidr-perl, liblog-any-perl, liblog-any-adapter-log4perl-perl, libfile-readbackwards-perl, libregexp-common-perl
+Depends: perl, nftables, postgresql-client, libconfig-tiny-perl, libdbi-perl, libdbd-pg-perl, libjson-perl, libnet-cidr-perl, liblog-any-perl, liblog-any-adapter-log4perl-perl, libfile-readbackwards-perl, libregexp-common-perl, libwww-perl
 Maintainer: Gardner <gardner@homelab>
 Description: Distributed IP blocking system with centralized database
  Bad IPs monitors system logs for malicious activity and automatically blocks
