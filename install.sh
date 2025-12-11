@@ -412,7 +412,7 @@ SQLEOF
 -- Create jailed_ips table
 CREATE TABLE IF NOT EXISTS jailed_ips (
     id SERIAL PRIMARY KEY,
-    ip VARCHAR(45) NOT NULL,
+    ip inet NOT NULL,
     originating_server VARCHAR(255) NOT NULL,
     originating_service VARCHAR(255),
     detector_name VARCHAR(255),

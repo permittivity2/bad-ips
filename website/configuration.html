@@ -280,10 +280,10 @@ db_password = your_secure_password_here
 db_ssl_mode = require</div>
 
             <h3>Database Schema</h3>
-            <p>Bad IPs uses the <code>jailed_ips</code> table:</p>
+            <p>Bad IPs uses the <code>jailed_ips</code> table with PostgreSQL's native <code>inet</code> type for IPv4/IPv6 support:</p>
             <div class="code-block">CREATE TABLE jailed_ips (
     id SERIAL PRIMARY KEY,
-    ip VARCHAR(45) NOT NULL,
+    ip inet NOT NULL,
     originating_server VARCHAR(255) NOT NULL,
     originating_service VARCHAR(255),
     detector_name VARCHAR(255),
@@ -474,7 +474,7 @@ sudo nft list set inet filter badipv4</div>
 
     <footer>
         <p><a href="index.html">← Back to Main</a></p>
-        <p>Bad IPs v2.0.24 - Silver Linings, LLC</p>
+        <p>Bad IPs v2.0.25 - Silver Linings, LLC</p>
     </footer>
 </body>
 </html>

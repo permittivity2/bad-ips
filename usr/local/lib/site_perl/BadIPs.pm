@@ -27,7 +27,7 @@ use Thread::Queue;
 $Data::Dumper::Sortkeys = 1;
 $Data::Dumper::Indent   = 1;
 
-our $VERSION = '2.0.24';
+our $VERSION = '2.0.25';
 
 # Service -> how to read + patterns (moved to conf.d, kept empty here)
 my %DETECTORS = ();
