@@ -813,7 +813,7 @@ setup_nftables() {
     nft add set inet filter always_block '{ type ipv4_addr; flags interval; }' 2>/dev/null || true
 
     # Create badipv4 set (dynamic with timeout, individual IPs only)
-    nft add set inet filter badipv4 '{ type ipv4_addr; flags timeout; }' 2>/dev/null || true
+    nft add set inet filter badipv4 '{ type ipv4_addr; flags interval, timeout; }' 2>/dev/null || true
 
     # Add rules in correct precedence order if they don't exist
     # 1. Never block (highest priority) - ACCEPT
