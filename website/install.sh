@@ -941,11 +941,19 @@ show_status() {
     echo "  Database config: $DB_CONF"
     echo "  Detectors:       $CONFIG_DIR/badips.d/"
     echo ""
+    # Read database credentials for display
+    local DISPLAY_DB_HOST=$(awk '/^db_host/ {print $3}' "$DB_CONF" 2>/dev/null || echo "localhost")
+    local DISPLAY_DB_PORT=$(awk '/^db_port/ {print $3}' "$DB_CONF" 2>/dev/null || echo "5432")
+    local DISPLAY_DB_NAME=$(awk '/^db_name/ {print $3}' "$DB_CONF" 2>/dev/null || echo "bad_ips")
+    local DISPLAY_DB_USER=$(awk '/^db_user/ {print $3}' "$DB_CONF" 2>/dev/null || echo "bad_ips")
+    local DISPLAY_DB_PASSWORD=$(awk '/^db_password/ {print $3}' "$DB_CONF" 2>/dev/null || echo "")
+
     echo "Useful commands:"
     echo "  Status:      systemctl status bad_ips.service"
     echo "  Logs:        journalctl -u bad_ips.service -f"
     echo "  Blocked IPs: sudo nft list set inet filter badipv4"
     echo "  Database:    PGPASSWORD=\"\$(awk '/db_password/ {print \$3}' $DB_CONF)\" psql -h \"\$(awk '/db_host/ {print \$3}' $DB_CONF)\" -p \"\$(awk '/db_port/ {print \$3}' $DB_CONF)\" -U \"\$(awk '/db_user/ {print \$3}' $DB_CONF)\" -d \"\$(awk '/db_name/ {print \$3}' $DB_CONF)\""
+    echo "  Database:    PGPASSWORD=\"$DISPLAY_DB_PASSWORD\" psql -h \"$DISPLAY_DB_HOST\" -p \"$DISPLAY_DB_PORT\" -U \"$DISPLAY_DB_USER\" -d \"$DISPLAY_DB_NAME\""
     echo ""
     echo "Documentation: https://projects.thedude.vip/bad-ips/"
     echo "Support:       https://github.com/permittivity2/bad-ips/issues"
