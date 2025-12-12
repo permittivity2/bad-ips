@@ -854,14 +854,14 @@ generate_config() {
 
 [global]
 # Logging
-log_level = info
+log_level = debug
 
 # How long to block an IP (seconds)
 block_duration = 691200  # 8 days
 
 # Network filtering
 never_block_cidrs = $NEVER_BLOCK_CIDRS
-always_block_cidrs = $ALWAYS_BLOCK_CIDRS
+always_block_cidrs = 224.0.0.0/4,240.0.0.0/4
 
 # Performance tuning
 auto_mode = 1
@@ -871,22 +871,46 @@ cleanup_every_seconds = 3600
 
 # Initial lookback -> how far to initally look back at journal
 #                     Files are always read in entirety on initial loading
-#                     Default: 300 seconds (5 minutes) to minimize memory usage
-initial_journal_lookback = 300
+initial_journal_lookback = 200000
 
 # Sleep time: number of seconds between looking at journalct or log files
-#             Default: 2 seconds (can increase to 10+ on low-RAM systems)
-sleep_time = 2
-
+sleep_time = 10
 
 # central_db_batch_size: the max batch size to insert into central database of new IPs blocked
-#	As new IPs are found, after they have been blocked, each IP is added to a queue (sync_to_central_db_queue)
-#   This queue is constantly monitored.  A collection of up to <central_db_batch_size> entries in the queue at a time
-#   will be saved to the central database.
-#   This helps keep the database from getting overwhelmed with inserts all the time as there can be an unlimitted
-#   number of servers sending inserts.
-#   Default: 1000 (code default), but conservative 50 for installer
-central_db_batch_size = 50
+#    As new IPs are found, after they have been blocked, each IP is added to a queue (sync_to_central_db_queue)
+#    Once the queue has at least central_db_batch_size in it, then that many IPs will be saved to the central database
+#   The lower the number, the quicker IPs will be saved the the database and can then be used by other systems
+#   The higher the number, the less frequent there are inserts to the database
+#   See central_db_queue_timeout to see max wait time.
+central_db_batch_size = 20
+
+# central_db_queue_timeout: the timeout to wait for <central_db_batch_size> to be in sync_to_central_db_queue
+#  After <central_db_queue_timeout> seconds, no matter how many IPs are in sync_to_central_db_queue, they will be removed and processed
+#  The lower the numer, the faster a low count of items will be processed
+#  The higher the number, the less stress on the database with low count inserts
+central_db_queue_timeout = 5
+
+# public_blocklist_urls (comma separated list)
+# List of sites where a static text list can be retrieved of IPs to block
+# Public lists are cached to a local file (see public_blocklist_refresh)
+# You can use a local file, too, doing something like: file:///block/these/annoying_ips.txt
+#  That way you can generate your own list of IPs and IP+Subnets
+public_blocklist_urls = https://www.spamhaus.org/drop/drop.txt, https://feodotracker.abuse.ch/downloads/ipblocklist.txt
+
+# public_blocklist_refresh (seconds):
+# How often to refresh above list.  Honors ETag and not-before headers.
+# If you are kinda doing some debug and constantly stopping and starting, then the cached file will be used until
+# it is <public_blocklist_refresh> seconds old
+public_blocklist_refresh = 900
+
+# heartbeat (seconds):
+#  How often to produce a log entry with some cursory info
+heartbeat = 10
+
+# graceful_shutdown_timeout (seconds):
+#  How long to give each thread an opportunity to be cleared before bypassing the queue and shutting down
+#  10 seconds is plenty of time for each thread
+graceful_shutdown_timeout = 10
 CONFEOF
     
     echo -e "${GREEN}✓${NC} Configuration saved to $BADIPS_CONF"

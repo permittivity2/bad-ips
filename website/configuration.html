@@ -114,7 +114,6 @@
                 <li><a href="#database">Database Configuration</a></li>
                 <li><a href="#detectors">Detector Configuration</a></li>
                 <li><a href="#patterns">Pattern Matching</a></li>
-                <li><a href="#examples">Complete Examples</a></li>
             </ul>
         </div>
 
@@ -132,7 +131,7 @@
                 <tr>
                     <td><code>log_level</code></td>
                     <td>Logging verbosity: debug, info, warn, error</td>
-                    <td>info</td>
+                    <td>debug</td>
                 </tr>
                 <tr>
                     <td><code>block_duration</code></td>
@@ -147,7 +146,7 @@
                 <tr>
                     <td><code>always_block_cidrs</code></td>
                     <td>Comma-separated CIDRs that are always blocked (static firewall rules)</td>
-                    <td><em>Optional</em></td>
+                    <td>224.0.0.0/4,240.0.0.0/4</td>
                 </tr>
                 <tr>
                     <td><code>auto_mode</code></td>
@@ -162,48 +161,111 @@
                 <tr>
                     <td><code>sleep_time</code></td>
                     <td>Seconds between log scans</td>
-                    <td>2</td>
+                    <td>10</td>
                 </tr>
                 <tr>
                     <td><code>initial_journal_lookback</code></td>
                     <td>Initial journal history to scan (seconds)</td>
-                    <td>300 (5 minutes)</td>
+                    <td>200000</td>
+                </tr>
+                <tr>
+                    <td><code>central_db_batch_size</code></td>
+                    <td>Max batch size for PostgreSQL inserts before timeout</td>
+                    <td>20</td>
+                </tr>
+                <tr>
+                    <td><code>central_db_queue_timeout</code></td>
+                    <td>Max seconds to wait before processing queued IPs (regardless of batch size)</td>
+                    <td>5</td>
+                </tr>
+                <tr>
+                    <td><code>public_blocklist_urls</code></td>
+                    <td>Comma-separated list of URLs to fetch blocklists from (HTTP/HTTPS/file://)</td>
+                    <td><em>Optional</em></td>
+                </tr>
+                <tr>
+                    <td><code>public_blocklist_refresh</code></td>
+                    <td>How often to refresh public blocklists (seconds)</td>
+                    <td>900 (15 minutes)</td>
                 </tr>
                 <tr>
                     <td><code>heartbeat</code></td>
                     <td>Status logging interval (seconds)</td>
-                    <td>60</td>
+                    <td>10</td>
                 </tr>
                 <tr>
-                    <td><code>central_db_batch_size</code></td>
-                    <td>Max batch size for PostgreSQL inserts</td>
-                    <td>1000</td>
+                    <td><code>graceful_shutdown_timeout</code></td>
+                    <td>Max seconds to wait for threads to finish during shutdown</td>
+                    <td>10</td>
                 </tr>
             </table>
 
             <h3>Example Configuration</h3>
-            <div class="code-block">[global]
+            <div class="code-block">
+# Bad IPs Configuration
+# Generated during installation on Tue Dec  9 03:50:28 PM CST 2025
+
+[global]
 # Logging
-log_level = info
+log_level = debug
 
-# Blocking duration (8 days)
-block_duration = 691200
+# How long to block an IP (seconds)
+block_duration = 691200  # 8 days
 
-# Never block these networks (CRITICAL!)
-never_block_cidrs = 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8
-
-# Always block these networks (optional)
-always_block_cidrs = 198.51.100.0/24,203.0.113.0/24
+# Network filtering
+never_block_cidrs = 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,169.254.0.0/16,23.116.91.64/29
+always_block_cidrs = 224.0.0.0/4,240.0.0.0/4
 
 # Performance tuning
 auto_mode = 1
-cleanup_every_seconds = 3600
-sleep_time = 2
-initial_journal_lookback = 300
-heartbeat = 60
 
-# Database batch settings
-central_db_batch_size = 1000</div>
+# Cleanup intervals
+cleanup_every_seconds = 3600
+
+# Initial lookback -> how far to initally look back at journal
+#                     Files are always read in entirety on initial loading
+initial_journal_lookback = 200000
+
+# Sleep time: number of seconds between looking at journalct or log files
+sleep_time = 10
+
+
+# central_db_batch_size: the max batch size to insert into central database of new IPs blocked
+#	As new IPs are found, after they have been blocked, each IP is added to a queue (sync_to_central_db_queue)
+#	Once the queue has at least central_db_batch_size in it, then that many IPs will be saved to the central database
+#   The lower the number, the quicker IPs will be saved the the database and can then be used by other systems
+#   The higher the number, the less frequent there are inserts to the database
+#   See central_db_queue_timeout to see max wait time.
+central_db_batch_size = 20
+# central_db_queue_timeout: the timeout to wait for <central_db_batch_size> to be in sync_to_central_db_queue
+#  After <central_db_queue_timeout> seconds, no matter how many IPs are in sync_to_central_db_queue, they will be removed and processed
+#  The lower the numer, the faster a low count of items will be processed
+#  The higher the number, the less stress on the database with low count inserts
+central_db_queue_timeout = 5
+
+# public_blocklist_urls (comma separated list)
+# List of sites where a static text list can be retrieved of IPs to block 
+# Public lists are cached to a local file (see public_blocklist_refresh)
+# You can use a local file, too, doing something like: file:///block/these/annoying_ips.txt
+#  That way you can generate your own list of IPs and IP+Subnets
+public_blocklist_urls = https://www.spamhaus.org/drop/drop.txt, https://feodotracker.abuse.ch/downloads/ipblocklist.txt
+# public_blocklist_refresh (seconds):
+# How often to refresh above list.  Honors ETag and not-before headers.
+# If you are kinda doing some debug and constantly stopping and starting, then the cached file will be used until 
+# it is <public_blocklist_refresh> seconds old
+public_blocklist_refresh = 900
+
+
+# heartbeat (seconds): 
+#  How often to produce a log entry with some cursory info
+heartbeat = 10
+
+# graceful_shutdown_timeout (seconds):
+#  How long to give each thread an opportunity to be cleared before bypassing the queue and shutting down
+#  10 seconds is plenty of time for each thread
+graceful_shutdown_timeout = 10
+
+</div>
 
             <div class="alert">
                 <strong>⚠️ Critical:</strong> Always configure <code>never_block_cidrs</code> with your management networks to prevent lockouts!
@@ -390,61 +452,6 @@ pattern3 = query failed \(SERVFAIL\)</div>
             <p>Runs Bad IPs in detection-only mode. IPs are identified but not blocked.</p>
         </div>
 
-        <div class="card" id="examples">
-            <h2>Complete Examples</h2>
-
-            <h3>Example 1: Single Server</h3>
-            <div class="code-block"># /usr/local/etc/badips.conf
-[global]
-log_level = info
-block_duration = 691200
-never_block_cidrs = 192.168.1.0/24,127.0.0.0/8
-always_block_cidrs = 198.51.100.0/24
-
-# /usr/local/etc/badips.d/database.conf
-[global]
-db_host = localhost
-db_port = 5432
-db_name = bad_ips
-db_user = bad_ips
-db_password = password123
-
-# /usr/local/etc/badips.d/10-sshd.conf
-[detector:sshd]
-units = ssh.service
-pattern1 = Failed password</div>
-
-            <h3>Example 2: Multi-Server with Central Database</h3>
-            <div class="code-block"># Same config on all servers:
-
-# /usr/local/etc/badips.conf
-[global]
-log_level = info
-block_duration = 691200
-never_block_cidrs = 10.0.0.0/8,172.16.0.0/12
-always_block_cidrs = 203.0.113.0/24,198.51.100.0/24
-
-# /usr/local/etc/badips.d/database.conf
-[global]
-db_host = 10.10.0.100  # Central DB server
-db_port = 5432
-db_name = bad_ips
-db_user = bad_ips_admin
-db_password = shared_password
-db_ssl_mode = require
-
-# Each server has detectors for its services</div>
-
-            <h3>Example 3: Debug Mode</h3>
-            <div class="code-block"># For troubleshooting, enable debug logging:
-[global]
-log_level = debug
-
-# Then reload and watch logs:
-sudo systemctl reload bad_ips
-sudo journalctl -u bad_ips.service -f</div>
-        </div>
-
         <div class="card">
             <h2>Service Management</h2>
             <h3>Common Commands</h3>
@@ -474,7 +481,7 @@ sudo nft list set inet filter badipv4</div>
 
     <footer>
         <p><a href="index.html">← Back to Main</a></p>
-        <p>Bad IPs v2.0.29 - Silver Linings, LLC</p>
+        <p>Bad IPs v3.0.0 - Silver Linings, LLC</p>
     </footer>
 </body>
 </html>

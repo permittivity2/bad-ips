@@ -7,6 +7,17 @@ if [ ! -d /var/lib/bad_ips ]; then
     chmod 755 /var/lib/bad_ips
 fi
 
+# Create log directory and file
+if [ ! -d /var/log/bad_ips ]; then
+    mkdir -p /var/log/bad_ips
+    chmod 755 /var/log/bad_ips
+fi
+
+if [ ! -f /var/log/bad_ips/bad_ips.log ]; then
+    touch /var/log/bad_ips/bad_ips.log
+    chmod 640 /var/log/bad_ips/bad_ips.log
+fi
+
 # Create nftables set if it doesn't exist
 if ! nft list set inet filter badipv4 >/dev/null 2>&1; then
     # Check if inet filter table exists
