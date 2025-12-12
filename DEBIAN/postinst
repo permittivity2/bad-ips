@@ -30,7 +30,7 @@ if ! nft list set inet filter badipv4 >/dev/null 2>&1; then
 
     # Try to create the set
     if nft list table inet filter >/dev/null 2>&1; then
-        nft add set inet filter badipv4 '{ type ipv4_addr ; flags timeout ; }' || true
+        nft add set inet filter badipv4 '{ type ipv4_addr ; flags interval, timeout ; }' || true
         echo "Created nftables set 'badipv4' in inet filter table"
 
         # Add drop rule if not already present

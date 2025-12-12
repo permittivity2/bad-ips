@@ -110,7 +110,7 @@
 <body>
     <header>
         <h1>🛡️ Bad IPs</h1>
-        <p style="font-size:1.2em;opacity:0.9">v3.0.0 - Distributed IP Blocking System</p>
+        <p style="font-size:1.2em;opacity:0.9">v3.0.1 - Distributed IP Blocking System</p>
         <p>Real-time threat detection with centralized database</p>
         <p>THIS IS ALPHA SOFTWARE!!!  THIS IS NOT YET READY FOR PRODUCTION!!!</p>
     </header>
@@ -194,7 +194,7 @@ sudo nft add chain inet filter input '{ type filter hook input priority 0; }'
 # Create sets
 sudo nft add set inet filter never_block '{ type ipv4_addr; flags interval; }'
 sudo nft add set inet filter always_block '{ type ipv4_addr; flags interval; }'
-sudo nft add set inet filter badipv4 '{ type ipv4_addr; flags timeout; }'
+sudo nft add set inet filter badipv4 '{ type ipv4_addr; flags interval, timeout; }'
 
 # Add rules (order matters!)
 sudo nft add rule inet filter input ip saddr @never_block accept
@@ -346,7 +346,7 @@ bad_ips --test-config</div>
     </div>
 
     <footer>
-        <p>Bad IPs v3.0.0 - Silver Linings, LLC</p>
+        <p>Bad IPs v3.0.1 - Silver Linings, LLC</p>
         <p><a href="https://projects.thedude.vip/apt/">APT Repo</a> | <a href="https://github.com/permittivity2/bad-ips">GitHub</a></p>
     </footer>
 
