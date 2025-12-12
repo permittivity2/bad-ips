@@ -1,10 +1,13 @@
 # 🛡️ Bad IPs - Distributed IP Blocking System
 
-[![Version](https://img.shields.io/badge/version-3.1.0-blue.svg)](https://github.com/permittivity2/bad-ips/releases)
+[![Version](https://img.shields.io/badge/version-3.1.2-blue.svg)](https://github.com/permittivity2/bad-ips/releases)
+[![Status](https://img.shields.io/badge/status-ALPHA-red.svg)](https://github.com/permittivity2/bad-ips)
 [![License](https://img.shields.io/badge/license-Proprietary-red.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Debian%20%7C%20Ubuntu-orange.svg)](https://projects.thedude.vip/bad-ips/)
 
 **A distributed IP blocking system with centralized database for real-time threat sharing across your infrastructure.**
+
+> ⚠️ **ALPHA STATUS**: This software is currently in alpha testing. While it is being actively tested on live production servers, it may contain bugs and the configuration format may change in future releases. Use with appropriate caution and testing in your environment.
 
 ---
 

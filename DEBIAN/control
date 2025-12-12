@@ -1,14 +1,17 @@
 Package: bad-ips
-Version: 3.1.0
+Version: 3.1.2
 Section: admin
 Priority: optional
 Architecture: all
 Depends: perl, nftables, postgresql-client, libconfig-tiny-perl, libdbi-perl, libdbd-pg-perl, libjson-perl, libnet-cidr-perl, liblog-log4perl-perl, libfile-readbackwards-perl, libregexp-common-perl, libwww-perl
 Maintainer: Gardner <gardner@homelab>
-Description: Distributed IP blocking system with centralized database
+Description: Distributed IP blocking system with centralized database (ALPHA)
  Bad IPs monitors system logs for malicious activity and automatically blocks
  offending IP addresses using nftables. Features centralized PostgreSQL database
  for correlation across multiple servers.
+ .
+ ALPHA STATUS: This software is currently in alpha testing. While actively
+ tested on live production servers, use with appropriate caution.
  .
  Features:
   - Real-time log monitoring with systemd journal integration
