@@ -395,10 +395,25 @@ configure_database() {
     echo ""
     echo "Bad IPs requires a PostgreSQL database for storing block information."
     echo ""
-    
-    # Ask for database host
-    read -p "Database hostname or IP address [localhost]: " DB_HOST
-    DB_HOST=${DB_HOST:-localhost}
+
+    # Load existing database config if it exists
+    local EXISTING_DB_HOST="localhost"
+    local EXISTING_DB_PORT="5432"
+    local EXISTING_DB_NAME="bad_ips"
+    local EXISTING_DB_USER="bad_ips"
+
+    if [ -f "$DB_CONF" ]; then
+        echo -e "${CYAN}Found existing database configuration.${NC}"
+        EXISTING_DB_HOST=$(awk '/^db_host/ {print $3}' "$DB_CONF" 2>/dev/null || echo "localhost")
+        EXISTING_DB_PORT=$(awk '/^db_port/ {print $3}' "$DB_CONF" 2>/dev/null || echo "5432")
+        EXISTING_DB_NAME=$(awk '/^db_name/ {print $3}' "$DB_CONF" 2>/dev/null || echo "bad_ips")
+        EXISTING_DB_USER=$(awk '/^db_user/ {print $3}' "$DB_CONF" 2>/dev/null || echo "bad_ips")
+        echo ""
+    fi
+
+    # Ask for database host with existing value as default
+    read -p "Database hostname or IP address [$EXISTING_DB_HOST]: " DB_HOST
+    DB_HOST=${DB_HOST:-$EXISTING_DB_HOST}
     
     # Check if localhost
     if [[ "$DB_HOST" == "localhost" ]] || [[ "$DB_HOST" == "127.0.0.1" ]]; then
@@ -414,8 +429,8 @@ configure_database() {
                 install_postgresql
                 
                 # Get database credentials
-                read -p "Database username [bad_ips]: " DB_USER
-                DB_USER=${DB_USER:-bad_ips}
+                read -p "Database username [$EXISTING_DB_USER]: " DB_USER
+                DB_USER=${DB_USER:-$EXISTING_DB_USER}
                 
                 echo ""
                 echo "A random password will be generated for the database user."
@@ -438,14 +453,14 @@ configure_database() {
             echo ""
             echo "PostgreSQL is already installed."
             echo ""
-            
-            read -p "Database username [bad_ips]: " DB_USER
-            DB_USER=${DB_USER:-bad_ips}
-            
-            read -p "Database port [5432]: " DB_PORT
-            DB_PORT=${DB_PORT:-5432}
-            
-            DB_NAME="bad_ips"
+
+            read -p "Database username [$EXISTING_DB_USER]: " DB_USER
+            DB_USER=${DB_USER:-$EXISTING_DB_USER}
+
+            read -p "Database port [$EXISTING_DB_PORT]: " DB_PORT
+            DB_PORT=${DB_PORT:-$EXISTING_DB_PORT}
+
+            DB_NAME="$EXISTING_DB_NAME"
             
             # Try to connect
             echo ""
@@ -481,6 +496,12 @@ configure_database() {
                         ADMIN_USER=${ADMIN_USER:-postgres}
 
                         ADMIN_PASSWORD=$(read_password "Admin password: ")
+
+                        # Re-read DB_USER in case it wasn't set
+                        if [ -z "$DB_USER" ]; then
+                            read -p "Database username [$EXISTING_DB_USER]: " DB_USER
+                            DB_USER=${DB_USER:-$EXISTING_DB_USER}
+                        fi
                         
                         # Generate new password for bad_ips user
                         DB_PASSWORD=$(generate_password)
@@ -513,15 +534,15 @@ configure_database() {
         echo ""
         echo "Configuring remote PostgreSQL database..."
         echo ""
-        
-        read -p "Database port [5432]: " DB_PORT
-        DB_PORT=${DB_PORT:-5432}
-        
-        read -p "Database name [bad_ips]: " DB_NAME
-        DB_NAME=${DB_NAME:-bad_ips}
-        
-        read -p "Database username [bad_ips]: " DB_USER
-        DB_USER=${DB_USER:-bad_ips}
+
+        read -p "Database port [$EXISTING_DB_PORT]: " DB_PORT
+        DB_PORT=${DB_PORT:-$EXISTING_DB_PORT}
+
+        read -p "Database name [$EXISTING_DB_NAME]: " DB_NAME
+        DB_NAME=${DB_NAME:-$EXISTING_DB_NAME}
+
+        read -p "Database username [$EXISTING_DB_USER]: " DB_USER
+        DB_USER=${DB_USER:-$EXISTING_DB_USER}
         
         DB_PASSWORD=$(read_password "Database password: ")
 
@@ -907,6 +928,7 @@ show_status() {
     echo "  Status:      systemctl status bad_ips.service"
     echo "  Logs:        journalctl -u bad_ips.service -f"
     echo "  Blocked IPs: sudo nft list set inet filter badipv4"
+    echo "  Database:    PGPASSWORD=\"\$(awk '/db_password/ {print \$3}' $DB_CONF)\" psql -h \"\$(awk '/db_host/ {print \$3}' $DB_CONF)\" -p \"\$(awk '/db_port/ {print \$3}' $DB_CONF)\" -U \"\$(awk '/db_user/ {print \$3}' $DB_CONF)\" -d \"\$(awk '/db_name/ {print \$3}' $DB_CONF)\""
     echo ""
     echo "Documentation: https://projects.thedude.vip/bad-ips/"
     echo "Support:       https://github.com/permittivity2/bad-ips/issues"
