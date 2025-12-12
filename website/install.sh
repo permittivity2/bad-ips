@@ -401,6 +401,8 @@ configure_database() {
     local EXISTING_DB_PORT="5432"
     local EXISTING_DB_NAME="bad_ips"
     local EXISTING_DB_USER="bad_ips"
+    local EXISTING_DB_PASSWORD=""
+    local HAVE_EXISTING_CONFIG=0
 
     if [ -f "$DB_CONF" ]; then
         echo -e "${CYAN}Found existing database configuration.${NC}"
@@ -408,6 +410,8 @@ configure_database() {
         EXISTING_DB_PORT=$(awk '/^db_port/ {print $3}' "$DB_CONF" 2>/dev/null || echo "5432")
         EXISTING_DB_NAME=$(awk '/^db_name/ {print $3}' "$DB_CONF" 2>/dev/null || echo "bad_ips")
         EXISTING_DB_USER=$(awk '/^db_user/ {print $3}' "$DB_CONF" 2>/dev/null || echo "bad_ips")
+        EXISTING_DB_PASSWORD=$(awk '/^db_password/ {print $3}' "$DB_CONF" 2>/dev/null)
+        HAVE_EXISTING_CONFIG=1
         echo ""
     fi
 
@@ -464,9 +468,16 @@ configure_database() {
             
             # Try to connect
             echo ""
-            echo "Testing connection to existing database..."
-            DB_PASSWORD=$(read_password "Enter password for user '$DB_USER': ")
-            
+
+            # Use existing password if available
+            if [ $HAVE_EXISTING_CONFIG -eq 1 ] && [ -n "$EXISTING_DB_PASSWORD" ]; then
+                echo "Testing connection to existing database with saved credentials..."
+                DB_PASSWORD="$EXISTING_DB_PASSWORD"
+            else
+                echo "Testing connection to existing database..."
+                DB_PASSWORD=$(read_password "Enter password for user '$DB_USER': ")
+            fi
+
             if test_pg_connection "localhost" "$DB_PORT" "$DB_NAME" "$DB_USER" "$DB_PASSWORD"; then
                 echo -e "${GREEN}✓${NC} Connection successful!"
                 
@@ -543,8 +554,14 @@ configure_database() {
 
         read -p "Database username [$EXISTING_DB_USER]: " DB_USER
         DB_USER=${DB_USER:-$EXISTING_DB_USER}
-        
-        DB_PASSWORD=$(read_password "Database password: ")
+
+        # Use existing password if available
+        if [ $HAVE_EXISTING_CONFIG -eq 1 ] && [ -n "$EXISTING_DB_PASSWORD" ]; then
+            echo "Using saved database password..."
+            DB_PASSWORD="$EXISTING_DB_PASSWORD"
+        else
+            DB_PASSWORD=$(read_password "Database password: ")
+        fi
 
         echo ""
         if test_pg_connection_with_retry "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$DB_PASSWORD"; then
