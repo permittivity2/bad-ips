@@ -1,3 +1,4 @@
+/usr/local/etc/badips/log4perl.conf
 /usr/local/etc/badips.d/10-sshd.conf
 /usr/local/etc/badips.d/20-postfix.conf
 /usr/local/etc/badips.d/30-dovecot.conf

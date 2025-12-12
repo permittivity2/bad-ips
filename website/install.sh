@@ -83,7 +83,7 @@ check_nftables() {
     # Check if iptables is active
     if command -v iptables &> /dev/null && iptables -L -n &> /dev/null; then
         echo ""
-        echo -e "${YELLOW}Warning: iptables appears to be active on this system.${NC}"
+        echo -e "${YELLOW}Warning: iptables appears to be active on this system.  It may not be.  This is a shallow check.${NC}"
         echo ""
         echo "Bad IPs requires nftables and cannot work with iptables."
         echo ""
@@ -742,10 +742,20 @@ configure_never_block() {
     echo "Configure networks that should NEVER be blocked."
     echo "This prevents accidentally locking yourself out!"
     echo ""
-    
+
     # Default safe CIDRs (RFC1918 + localhost + other non-routable)
     DEFAULT_CIDRS="10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,169.254.0.0/16,224.0.0.0/4,240.0.0.0/4"
-    
+
+    # Check if badips.conf exists and read existing never_block_cidrs
+    if [ -f "$BADIPS_CONF" ]; then
+        EXISTING_CIDRS=$(awk '/^never_block_cidrs/ {for(i=3; i<=NF; i++) printf "%s%s", $i, (i<NF ? " " : ""); print ""}' "$BADIPS_CONF" 2>/dev/null | tr -d ' ')
+        if [ -n "$EXISTING_CIDRS" ]; then
+            DEFAULT_CIDRS="$EXISTING_CIDRS"
+            echo -e "${CYAN}Found existing trusted networks configuration.${NC}"
+            echo ""
+        fi
+    fi
+
     echo "Default trusted networks (RFC1918 + non-routable):"
     echo "$DEFAULT_CIDRS" | tr ',' '\n' | sed 's/^/  /'
     echo ""
@@ -785,8 +795,20 @@ configure_always_block() {
     echo "Note: never_block takes precedence over always_block"
     echo ""
 
-    read -p "Enter comma-separated CIDRs to always block (or press Enter to skip): " USER_ALWAYS_CIDRS
-    ALWAYS_BLOCK_CIDRS=${USER_ALWAYS_CIDRS:-}
+    # Check if badips.conf exists and read existing always_block_cidrs
+    DEFAULT_ALWAYS=""
+    if [ -f "$BADIPS_CONF" ]; then
+        EXISTING_ALWAYS=$(awk '/^always_block_cidrs/ {for(i=3; i<=NF; i++) printf "%s%s", $i, (i<NF ? " " : ""); print ""}' "$BADIPS_CONF" 2>/dev/null | tr -d ' ')
+        if [ -n "$EXISTING_ALWAYS" ]; then
+            DEFAULT_ALWAYS="$EXISTING_ALWAYS"
+            echo -e "${CYAN}Found existing always-block configuration:${NC}"
+            echo "$DEFAULT_ALWAYS" | tr ',' '\n' | sed 's/^/  /'
+            echo ""
+        fi
+    fi
+
+    read -p "Enter comma-separated CIDRs to always block (or press Enter to skip) [$DEFAULT_ALWAYS]: " USER_ALWAYS_CIDRS
+    ALWAYS_BLOCK_CIDRS=${USER_ALWAYS_CIDRS:-$DEFAULT_ALWAYS}
 
     if [[ -n "$ALWAYS_BLOCK_CIDRS" ]]; then
         echo ""
@@ -855,7 +877,7 @@ generate_config() {
 
 [global]
 # Logging
-log_level = debug
+log_level = info
 
 # How long to block an IP (seconds)
 block_duration = 691200  # 8 days
@@ -872,10 +894,10 @@ cleanup_every_seconds = 3600
 
 # Initial lookback -> how far to initally look back at journal
 #                     Files are always read in entirety on initial loading
-initial_journal_lookback = 200000
+initial_journal_lookback = 86400
 
 # Sleep time: number of seconds between looking at journalct or log files
-sleep_time = 10
+sleep_time = 2
 
 # central_db_batch_size: the max batch size to insert into central database of new IPs blocked
 #    As new IPs are found, after they have been blocked, each IP is added to a queue (sync_to_central_db_queue)
@@ -906,7 +928,7 @@ public_blocklist_refresh = 900
 
 # heartbeat (seconds):
 #  How often to produce a log entry with some cursory info
-heartbeat = 10
+heartbeat = 300
 
 # graceful_shutdown_timeout (seconds):
 #  How long to give each thread an opportunity to be cleared before bypassing the queue and shutting down

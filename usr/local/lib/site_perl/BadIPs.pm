@@ -32,7 +32,7 @@ $Data::Dumper::Indent   = 1;
 
 my $log = get_logger("BadIPs") || die "You MUST initialize Log::Log4perl before using BadIPs module";
 
-our $VERSION = '3.0.3';
+our $VERSION = '3.1.0';
 
 # -------------------------------------------------------------------------
 # Shared state for all threads
@@ -149,6 +149,8 @@ sub new {
         threads    => [],
         blocked    => {},     # ip => expires_epoch (in-memory view of nftables set)
         run_count  => 0,
+        logconf    => $args{logconf} || 0,
+        logconf_refresh_interval => $args{logconf_refresh_interval} || 5,
     };
 
     bless $self, $class;
@@ -198,12 +200,30 @@ sub run {
         read_journal_since  => time() - $self->{conf}->{initial_journal_lookback},
     );
 
+    # Pretty harsh but necessary: monitor log4perl config file for changes
+    my $logconf_mtime = ( stat($self->{logconf}) )[9] or die "Cannot stat logconf file '$self->{logconf}'";
+    my $logconf_reload_epoch = 0;
+
     MAIN_LOOP:
     while (1) {
         # Check for shutdown
         if (_get_shutdown_flag()) {
             $log->info("Shutdown flag detected in main loop");
             last MAIN_LOOP;
+        }
+
+        # Check log4perl config change and set reload if needed
+        my $current_logconf_mtime = ( stat($self->{logconf}) )[9] or die "Cannot stat logconf file '$self->{logconf}'";
+        if ($current_logconf_mtime != $logconf_mtime) {
+            $logconf_reload_epoch = int(time()) + $self->{logconf_refresh_interval};
+            my $reload_dt = strftime("%Y-%m-%d %H:%M:%S", localtime($logconf_reload_epoch));
+            $log->debug("Threads will reload at or after $reload_dt due to log4perl config file change");
+            $logconf_mtime = $current_logconf_mtime;
+        }
+        if ( $logconf_reload_epoch && time() >= $logconf_reload_epoch ) {
+            $log->info("Setting threads to reload due to log4perl config file change");
+            _set_reload_flag();
+            $logconf_reload_epoch = 0;
         }
 
         # Check for reload
@@ -1115,7 +1135,7 @@ sub _worker_nft_blocker {
             $blocked_in_thread{$item->{ip}} = $res->{expires};
             _enqueue_central_db_update(item => $item, expires => $res->{expires}); # PRetty much fire-and-forget
         } else {
-            $log->info("NFT block failed for $item->{ip}: $res->{err}");
+            $log->debug("NFT block failed but this is probably not an actual error for $item->{ip}: $res->{err}");
         }
     }
     $log->info("nft_blocker_thread ready to be joined");
@@ -1317,7 +1337,8 @@ sub _worker_central_db_sync {
             sleep 10;
         } else {
             my @ips = map { $_->{ip} } @batch;
-            $log->info("Synced " . scalar(@batch) . " IP(s) to central DB: " . join(", ", @ips));
+            $log->info("Synced or updated " . scalar(@batch) . " IP" . (scalar(@batch) == 1 ? '' : 's') .
+                       " to central DB: " . join(", ", @ips));
         }
     }
 
@@ -2362,4 +2383,5 @@ sub _remote_addresses {
 }
 
 1;
+
 
