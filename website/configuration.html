@@ -100,6 +100,7 @@
     <header>
         <h1>📚 Configuration Reference</h1>
         <p>Complete guide to configuring Bad IPs</p>
+        <p style="background: #ff6b6b; color: white; padding: 8px; border-radius: 5px; font-size: 0.9em; margin-top: 10px;">⚠️ ALPHA SOFTWARE - Currently in testing. Configuration format may change in future releases.</p>
     </header>
 
     <div class="container">
@@ -111,6 +112,7 @@
             <h2>Table of Contents</h2>
             <ul>
                 <li><a href="#main">Main Configuration (badips.conf)</a></li>
+                <li><a href="#logging">Logging Configuration (log4perl.conf)</a></li>
                 <li><a href="#database">Database Configuration</a></li>
                 <li><a href="#detectors">Detector Configuration</a></li>
                 <li><a href="#patterns">Pattern Matching</a></li>
@@ -286,6 +288,68 @@ graceful_shutdown_timeout = 10
                 <li>Cloud scanner networks (Shodan, Censys, etc.)</li>
             </ul>
             <p><strong>Note:</strong> IPs in always_block are still logged to the database for reporting purposes. Different servers can have different always_block configurations based on their role (e.g., block on DNS/mail but not web).</p>
+        </div>
+
+        <div class="card" id="logging">
+            <h2>Logging Configuration</h2>
+            <p>File: <code>/usr/local/etc/badips/log4perl.conf</code></p>
+            <p>Bad IPs uses Log::Log4perl for flexible logging configuration.</p>
+
+            <h3>Default Configuration</h3>
+            <pre><code># Root logger
+log4perl.rootLogger = INFO, SYS
+
+# File appender
+log4perl.appender.SYS = Log::Log4perl::Appender::File
+log4perl.appender.SYS.filename = /var/log/bad_ips/bad_ips.log
+log4perl.appender.SYS.mode = append
+log4perl.appender.SYS.layout = Log::Log4perl::Layout::PatternLayout
+log4perl.appender.SYS.layout.ConversionPattern = %d|%P|%p|%l|%X{THREAD}|%m%n</code></pre>
+
+            <h3>Log Levels</h3>
+            <ul>
+                <li><strong>DEBUG</strong> - Detailed diagnostic information (verbose)</li>
+                <li><strong>INFO</strong> - General informational messages (default)</li>
+                <li><strong>WARN</strong> - Warning messages</li>
+                <li><strong>ERROR</strong> - Error messages only</li>
+            </ul>
+
+            <h3>Changing Log Level</h3>
+            <p>To enable debug logging, edit <code>/usr/local/etc/badips/log4perl.conf</code>:</p>
+            <pre><code># Change INFO to DEBUG
+log4perl.rootLogger = DEBUG, SYS</code></pre>
+            <p>Then reload the service:</p>
+            <pre><code>sudo systemctl reload bad_ips</code></pre>
+
+            <h4>Reload Timing</h4>
+            <p>Log configuration changes are applied gradually:</p>
+            <ul>
+                <li><strong>Main thread:</strong> ~5 seconds after reload signal</li>
+                <li><strong>Worker threads:</strong> ~5 seconds + thread reload time</li>
+                <li>A log message indicates when threads will be reloaded</li>
+                <li>Watch logs with: <code>journalctl -u bad_ips -f</code></li>
+            </ul>
+            <p><strong>Note:</strong> The 5-second interval is hardcoded in <code>/usr/local/sbin/bad_ips</code>.
+            If you need immediate changes, modify the script and run <code>sudo systemctl restart bad_ips</code>.</p>
+
+            <h3>Log Format</h3>
+            <p>The default log format includes:</p>
+            <ul>
+                <li><strong>%d</strong> - Timestamp</li>
+                <li><strong>%P</strong> - Process ID</li>
+                <li><strong>%p</strong> - Log level (DEBUG, INFO, etc.)</li>
+                <li><strong>%l</strong> - Location (file:line)</li>
+                <li><strong>%X{THREAD}</strong> - Thread name (main, nft_blocker, etc.)</li>
+                <li><strong>%m</strong> - Log message</li>
+            </ul>
+
+            <h3>Log Rotation</h3>
+            <p>Logs are automatically rotated by logrotate:</p>
+            <ul>
+                <li>Rotation: Daily</li>
+                <li>Retention: 14 days</li>
+                <li>Location: <code>/var/log/bad_ips/bad_ips.log</code></li>
+            </ul>
         </div>
 
         <div class="card" id="database">
@@ -481,7 +545,7 @@ sudo nft list set inet filter badipv4</div>
 
     <footer>
         <p><a href="index.html">← Back to Main</a></p>
-        <p>Bad IPs v3.1.0 - Silver Linings, LLC</p>
+        <p>Bad IPs v3.1.2 - Silver Linings, LLC</p>
     </footer>
 </body>
 </html>

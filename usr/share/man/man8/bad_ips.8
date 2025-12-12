@@ -1,4 +1,4 @@
-.TH BAD_IPS 8 "December 2025" "Bad IPs 3.1.0" "System Administration"
+.TH BAD_IPS 8 "December 2025" "Bad IPs 3.1.2" "System Administration"
 .SH NAME
 bad_ips \- distributed IP blocking system with centralized database
 .SH SYNOPSIS
@@ -10,6 +10,9 @@ bad_ips \- distributed IP blocking system with centralized database
 monitors system logs for malicious activity and automatically blocks offending IP addresses using nftables. It features a centralized PostgreSQL database for threat intelligence sharing across multiple servers.
 .PP
 When Bad IPs detects malicious activity on one server, that threat is immediately shared with all servers connected to the same database, providing distributed protection across your entire infrastructure.
+.PP
+.B "ALPHA STATUS:"
+This software is currently in alpha testing. While it is being actively tested on live production servers, it may contain bugs and the configuration format may change in future releases. Use with appropriate caution and testing in your environment.
 .SH OPTIONS
 .TP
 .BR \-\-test\-config
@@ -22,6 +25,9 @@ Run in dry-run mode where IPs are detected but not actually blocked. Useful for 
 .I /usr/local/etc/badips.conf
 Main configuration file containing global settings, blocking duration, trusted networks, and logging configuration.
 .TP
+.I /usr/local/etc/badips/log4perl.conf
+Log4perl configuration file controlling log format, level, and output destination. Changes take effect in the main thread after ~5 seconds, then in each worker thread after the next reload cycle (~5 seconds + thread reload time). A log message indicates when threads will be reloaded. The 5-second interval is hardcoded in /usr/local/sbin/bad_ips and can be modified if needed (requires service restart).
+.TP
 .I /usr/local/etc/badips.d/database.conf
 Database connection configuration including host, port, credentials, and SSL settings.
 .TP
@@ -30,6 +36,9 @@ Detector configuration files for various services (SSH, mail, web, DNS, etc.). E
 .TP
 .I /var/lib/bad_ips/
 Directory for local state files and failover logs.
+.TP
+.I /var/log/bad_ips/bad_ips.log
+Main log file for Bad IPs daemon. Configure log rotation with logrotate.
 .TP
 .I /usr/share/doc/bad-ips/
 Documentation directory containing README and configuration guides.
