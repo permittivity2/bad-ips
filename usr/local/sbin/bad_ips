@@ -6,21 +6,15 @@ use Getopt::Long qw(GetOptions);
 use Log::Log4perl qw(:easy get_logger);
 use Log::Log4perl::MDC;
 
-my $logfile = '/var/log/bad_ips/bad_ips.log';
+my $logconf = '/usr/local/etc/badips/log4perl.conf';
+my $logconf_refresh_interval = 5;
 
-# Log4perl config (syslog)
-my %logcfg = (
-  # 'log4perl.rootLogger'                       => 'INFO, SYS',
-  'log4perl.rootLogger'                       => 'DEBUG, SYS',
-  'log4perl.appender.SYS'                     => 'Log::Log4perl::Appender::File',
-  'log4perl.appender.SYS.filename'            => $logfile,
-  'log4perl.appender.SYS.mode'                => 'append',
-  'log4perl.appender.SYS.ident'               => 'bad_ips',
-  'log4perl.appender.SYS.facility'            => 'local0',
-  'log4perl.appender.SYS.layout'              => 'Log::Log4perl::Layout::PatternLayout',
-  'log4perl.appender.SYS.layout.ConversionPattern' => '%d|%P|%p|%l|%X{THREAD}|%m%n',
-);
-Log::Log4perl::init(\%logcfg);
+eval {
+  Log::Log4perl::init_and_watch($logconf, $logconf_refresh_interval);
+};
+if ($@) {
+  die "Failed to initialize Log::Log4perl with config '$logconf': $@\n";
+}
 Log::Log4perl::MDC->put("THREAD" => "main");
 
 use lib '/usr/local/lib/site_perl';
@@ -38,19 +32,6 @@ GetOptions(
   'dry-run!'     => \$dry_run,
 ) or die "Usage: $0 [--test-config] [--dry-run]\n";
 
-# Read log_level from config before initializing logger
-my $log_level = 'INFO';
-if (-f $conf_main) {
-  my $cfg = Config::Tiny->read($conf_main);
-  if ($cfg && $cfg->{global} && $cfg->{global}{log_level}) {
-    $log_level = uc($cfg->{global}{log_level});
-  }
-}
-
-# Re-initialize Log4perl with correct log level
-$logcfg{'log4perl.rootLogger'} = "$log_level, SYS";
-Log::Log4perl::init(\%logcfg);
-
 my $logger = get_logger("BadIPs");
 $logger->info("Starting BadIPs application");
 
@@ -58,6 +39,8 @@ my $app = BadIPs->new(
   conf_main => $conf_main,
   conf_dir  => $conf_dir,
   dry_run   => $dry_run,
+  logconf   => $logconf,
+  logconf_refresh_interval => $logconf_refresh_interval,
 );
 
 if ($test_config) {
@@ -71,3 +54,4 @@ $app->run();
 $logger->info("BadIPs application exited normally");
 
 exit(0);
+
