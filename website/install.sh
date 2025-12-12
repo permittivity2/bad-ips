@@ -469,14 +469,20 @@ configure_database() {
             # Try to connect
             echo ""
 
-            # Use existing password if available
+            # Ask about password if we have an existing one
             if [ $HAVE_EXISTING_CONFIG -eq 1 ] && [ -n "$EXISTING_DB_PASSWORD" ]; then
-                echo "Testing connection to existing database with saved credentials..."
-                DB_PASSWORD="$EXISTING_DB_PASSWORD"
+                read -p "Use existing saved password? [Y/n]: " USE_SAVED_PASSWORD
+                if [[ "$USE_SAVED_PASSWORD" =~ ^[Nn]$ ]]; then
+                    DB_PASSWORD=$(read_password "Enter new password for user '$DB_USER': ")
+                else
+                    DB_PASSWORD="$EXISTING_DB_PASSWORD"
+                fi
             else
-                echo "Testing connection to existing database..."
                 DB_PASSWORD=$(read_password "Enter password for user '$DB_USER': ")
             fi
+
+            echo ""
+            echo "Testing connection to existing database..."
 
             if test_pg_connection "localhost" "$DB_PORT" "$DB_NAME" "$DB_USER" "$DB_PASSWORD"; then
                 echo -e "${GREEN}✓${NC} Connection successful!"
@@ -555,10 +561,14 @@ configure_database() {
         read -p "Database username [$EXISTING_DB_USER]: " DB_USER
         DB_USER=${DB_USER:-$EXISTING_DB_USER}
 
-        # Use existing password if available
+        # Ask about password if we have an existing one
         if [ $HAVE_EXISTING_CONFIG -eq 1 ] && [ -n "$EXISTING_DB_PASSWORD" ]; then
-            echo "Using saved database password..."
-            DB_PASSWORD="$EXISTING_DB_PASSWORD"
+            read -p "Use existing saved password? [Y/n]: " USE_SAVED_PASSWORD
+            if [[ "$USE_SAVED_PASSWORD" =~ ^[Nn]$ ]]; then
+                DB_PASSWORD=$(read_password "Enter new database password: ")
+            else
+                DB_PASSWORD="$EXISTING_DB_PASSWORD"
+            fi
         else
             DB_PASSWORD=$(read_password "Database password: ")
         fi
