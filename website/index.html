@@ -110,7 +110,7 @@
 <body>
     <header>
         <h1>🛡️ Bad IPs</h1>
-        <p style="font-size:1.2em;opacity:0.9">v3.1.3 - Distributed IP Blocking System</p>
+        <p style="font-size:1.2em;opacity:0.9">v3.2.1 - Distributed IP Blocking System</p>
         <p>Real-time threat detection with centralized database</p>
         <p style="background: #ff6b6b; color: white; padding: 10px; border-radius: 5px; font-weight: bold;">⚠️ ALPHA SOFTWARE - Currently in testing on live production servers. Use with appropriate caution and testing in your environment.</p>
     </header>
@@ -187,19 +187,19 @@ never_block_cidrs = 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8
 always_block_cidrs = 240.0.0.0/4,198.51.100.0/24</div>
 
             <h3>4. Set Up nftables</h3>
-            <div class="install-box"># Create table and chain
-sudo nft add table inet filter
-sudo nft add chain inet filter input '{ type filter hook input priority 0; }'
+            <div class="install-box"># The installer creates /etc/nftables.d/99-badips.nft automatically
+# This provides a dedicated 'inet badips' table with IPv4 and IPv6 support
 
-# Create sets
-sudo nft add set inet filter never_block '{ type ipv4_addr; flags interval; }'
-sudo nft add set inet filter always_block '{ type ipv4_addr; flags interval; }'
-sudo nft add set inet filter badipv4 '{ type ipv4_addr; flags interval, timeout; }'
+# View the Bad IPs nftables configuration:
+sudo cat /etc/nftables.d/99-badips.nft
 
-# Add rules (order matters!)
-sudo nft add rule inet filter input ip saddr @never_block accept
-sudo nft add rule inet filter input ip saddr @always_block drop
-sudo nft add rule inet filter input ip saddr @badipv4 drop</div>
+# The configuration includes:
+# - IPv4 sets: badipv4, never_block, always_block
+# - IPv6 sets: badipv6, never_block_v6, always_block_v6
+# - Prerouting hook at priority -150 (processes all traffic)
+
+# Verify nftables configuration is loaded:
+sudo nft list table inet badips</div>
 
             <h3>5. Start Service</h3>
             <div class="install-box">sudo systemctl enable bad_ips
@@ -323,7 +323,9 @@ pattern2 = Failed password for root</div>
             <div class="install-box">systemctl status bad_ips
 systemctl reload bad_ips
 journalctl -u bad_ips.service -f
-sudo nft list set inet filter badipv4
+sudo nft list set inet badips badipv4
+sudo nft list set inet badips badipv6
+sudo nft list table inet badips
 bad_ips --test-config</div>
         </div>
 
@@ -346,7 +348,7 @@ bad_ips --test-config</div>
     </div>
 
     <footer>
-        <p>Bad IPs v3.1.3 - Silver Linings, LLC</p>
+        <p>Bad IPs v3.2.1 - Silver Linings, LLC</p>
         <p><a href="https://projects.thedude.vip/apt/">APT Repo</a> | <a href="https://github.com/permittivity2/bad-ips">GitHub</a></p>
     </footer>
 

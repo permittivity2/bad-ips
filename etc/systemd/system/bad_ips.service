@@ -1,6 +1,8 @@
 [Unit]
 Description=Bad IP Blocking Service
-After=network.target
+After=network.target nftables.service
+Wants=nftables.service
+ConditionPathExists=/etc/nftables.d/99-badips.nft
 
 [Service]
 Type=simple

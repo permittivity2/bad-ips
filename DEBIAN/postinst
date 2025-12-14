@@ -18,27 +18,15 @@ if [ ! -f /var/log/bad_ips/bad_ips.log ]; then
     chmod 640 /var/log/bad_ips/bad_ips.log
 fi
 
-# Create nftables set if it doesn't exist
-if ! nft list set inet filter badipv4 >/dev/null 2>&1; then
-    # Check if inet filter table exists
-    if ! nft list table inet filter >/dev/null 2>&1; then
-        echo "WARNING: nftables table 'inet filter' does not exist."
-        echo "Please create it manually with:"
-        echo "  sudo nft add table inet filter"
-        echo "  sudo nft add chain inet filter input '{ type filter hook input priority 0 ; }'"
-    fi
-
-    # Try to create the set
-    if nft list table inet filter >/dev/null 2>&1; then
-        nft add set inet filter badipv4 '{ type ipv4_addr ; flags interval, timeout ; }' || true
-        echo "Created nftables set 'badipv4' in inet filter table"
-
-        # Add drop rule if not already present
-        if ! nft list chain inet filter input 2>/dev/null | grep -q "badipv4 drop"; then
-            nft add rule inet filter input ip saddr @badipv4 drop || true
-            echo "Added drop rule for badipv4 set"
-        fi
-    fi
+# Setup nftables (if service is active)
+# The nftables configuration is managed by /etc/nftables.d/99-badips.nft
+# This file is created by the installer script and loaded automatically
+if systemctl is-active --quiet nftables.service; then
+    echo "Reloading nftables to apply Bad IPs configuration..."
+    systemctl reload nftables.service || true
+else
+    echo "Note: nftables.service is not active - Bad IPs rules not loaded"
+    echo "      Enable nftables to activate Bad IPs blocking"
 fi
 
 # Run database migration if database exists

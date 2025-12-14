@@ -142,13 +142,23 @@
                 </tr>
                 <tr>
                     <td><code>never_block_cidrs</code></td>
-                    <td>Comma-separated CIDRs that are never blocked (highest priority)</td>
+                    <td>Comma-separated IPv4 CIDRs that are never blocked (highest priority)</td>
                     <td><em>Required</em></td>
                 </tr>
                 <tr>
+                    <td><code>never_block_cidrs_v6</code></td>
+                    <td>Comma-separated IPv6 CIDRs that are never blocked (highest priority)</td>
+                    <td>::1/128,fe80::/10,fc00::/7</td>
+                </tr>
+                <tr>
                     <td><code>always_block_cidrs</code></td>
-                    <td>Comma-separated CIDRs that are always blocked (static firewall rules)</td>
+                    <td>Comma-separated IPv4 CIDRs that are always blocked (static firewall rules)</td>
                     <td>224.0.0.0/4,240.0.0.0/4</td>
+                </tr>
+                <tr>
+                    <td><code>always_block_cidrs_v6</code></td>
+                    <td>Comma-separated IPv6 CIDRs that are always blocked (static firewall rules)</td>
+                    <td><em>(empty)</em></td>
                 </tr>
                 <tr>
                     <td><code>auto_mode</code></td>
@@ -214,9 +224,13 @@ log_level = debug
 # How long to block an IP (seconds)
 block_duration = 691200  # 8 days
 
-# Network filtering
+# Network filtering (IPv4)
 never_block_cidrs = 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,169.254.0.0/16,23.116.91.64/29
 always_block_cidrs = 224.0.0.0/4,240.0.0.0/4
+
+# Network filtering (IPv6)
+never_block_cidrs_v6 = ::1/128,fe80::/10,fc00::/7
+always_block_cidrs_v6 =
 
 # Performance tuning
 auto_mode = 1
@@ -545,7 +559,7 @@ sudo nft list set inet filter badipv4</div>
 
     <footer>
         <p><a href="index.html">← Back to Main</a></p>
-        <p>Bad IPs v3.1.3 - Silver Linings, LLC</p>
+        <p>Bad IPs v3.2.1 - Silver Linings, LLC</p>
     </footer>
 </body>
 </html>

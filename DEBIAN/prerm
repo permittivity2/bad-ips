@@ -29,4 +29,23 @@ if systemctl is-enabled --quiet bad_ips.service 2>/dev/null; then
     echo "Disabled bad_ips.service"
 fi
 
+# Clean up nftables configuration on remove/purge
+if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
+    # Remove Bad IPs nftables configuration
+    rm -f /etc/nftables.d/99-badips.nft
+
+    # Reload nftables to remove our rules (if service is active)
+    if systemctl is-active --quiet nftables.service; then
+        systemctl reload nftables.service || true
+        echo "Removed Bad IPs nftables rules"
+    fi
+
+    # IMPORTANT: We intentionally leave these items in place:
+    # - /etc/nftables.d/ directory (may be used by other packages)
+    # - include statement in /etc/nftables.conf (may be used by other packages)
+
+    echo "Note: /etc/nftables.d/ directory and include statement in /etc/nftables.conf"
+    echo "      have been left in place as they may be used by other packages."
+fi
+
 exit 0
