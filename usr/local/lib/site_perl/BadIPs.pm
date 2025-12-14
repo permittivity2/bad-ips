@@ -32,7 +32,7 @@ $Data::Dumper::Indent   = 1;
 
 my $log = get_logger("BadIPs") || die "You MUST initialize Log::Log4perl before using BadIPs module";
 
-our $VERSION = '3.1.3';
+our $VERSION = '3.2.1';
 
 # -------------------------------------------------------------------------
 # Shared state for all threads
@@ -493,10 +493,12 @@ sub _load_config {
     $accum{journal_units}             //= 'ssh';
     $accum{bad_conn_patterns}         //= 'Failed password for invalid user,Failed password for root,Failed password for,Failed password for .* from,Failed password for .* from .* port';
     $accum{never_block_cidrs}         //= '';
+    $accum{never_block_cidrs_v6}      //= '';
     $accum{always_block_cidrs}        //= '';
+    $accum{always_block_cidrs_v6}     //= '';
     $accum{log_level}                 //= 'INFO';
     $accum{nft_table}                 //= 'inet';
-    $accum{nft_family_table}          //= 'filter';
+    $accum{nft_family_table}          //= 'badips';
     $accum{nft_set}                   //= 'badipv4';
     $accum{file_sources}              //= '';
     $accum{max_file_tail_lines}       //= 2000;
@@ -1247,7 +1249,10 @@ sub _nft_block_ip {
     my $ttl    = $args{ttl};
     my $conf   = $args{conf};
 
-    my $cmd = "nft add element $conf->{nft_table} $conf->{nft_family_table} $conf->{nft_set} { $ip timeout ${ttl}s }";
+    # Detect IPv6 (contains colons) vs IPv4 and use appropriate set
+    my $set = ($ip =~ /:/) ? 'badipv6' : 'badipv4';
+
+    my $cmd = "nft add element $conf->{nft_table} $conf->{nft_family_table} $set { $ip timeout ${ttl}s }";
 
     if ($conf->{dry_run}) {
         my $exp = time() + $ttl;
@@ -1685,8 +1690,8 @@ sub _refresh_static_nftables_sets {
     my $table        = $self->{conf}->{nft_table};
     my $family_table = $self->{conf}->{nft_family_table};
 
-    # never_block
-    $log->info("Refreshing never_block nftables set");
+    # IPv4 never_block
+    $log->info("Refreshing never_block (IPv4) nftables set");
     my $never_cidrs = $self->{conf}->{never_block_cidrs} || [];
 
     system("nft flush set $table $family_table never_block 2>/dev/null");
@@ -1703,8 +1708,26 @@ sub _refresh_static_nftables_sets {
         }
     }
 
-    # always_block
-    $log->info("Refreshing always_block nftables set");
+    # IPv6 never_block
+    $log->info("Refreshing never_block_v6 (IPv6) nftables set");
+    my $never_cidrs_v6 = $self->{conf}->{never_block_cidrs_v6} || [];
+
+    system("nft flush set $table $family_table never_block_v6 2>/dev/null");
+
+    for my $cidr (@$never_cidrs_v6) {
+        next unless $cidr;
+        $cidr =~ s/^\s+|\s+$//g;
+        next unless $cidr;
+        my $rc = system("nft add element $table $family_table never_block_v6 { $cidr } 2>/dev/null");
+        if ($rc == 0) {
+            $log->debug("Added $cidr to never_block_v6 set");
+        } else {
+            $log->info("Failed to add $cidr to never_block_v6 set");
+        }
+    }
+
+    # IPv4 always_block
+    $log->info("Refreshing always_block (IPv4) nftables set");
     my $always_cidrs = $self->{conf}->{always_block_cidrs} || [];
     system("nft flush set $table $family_table always_block 2>/dev/null");
 
@@ -1720,9 +1743,28 @@ sub _refresh_static_nftables_sets {
         }
     }
 
+    # IPv6 always_block
+    $log->info("Refreshing always_block_v6 (IPv6) nftables set");
+    my $always_cidrs_v6 = $self->{conf}->{always_block_cidrs_v6} || [];
+    system("nft flush set $table $family_table always_block_v6 2>/dev/null");
+
+    for my $cidr (@$always_cidrs_v6) {
+        next unless $cidr;
+        $cidr =~ s/^\s+|\s+$//g;
+        next unless $cidr;
+        my $rc = system("nft add element $table $family_table always_block_v6 { $cidr } 2>/dev/null");
+        if ($rc == 0) {
+            $log->debug("Added $cidr to always_block_v6 set");
+        } else {
+            $log->info("Failed to add $cidr to always_block_v6 set");
+        }
+    }
+
     $log->info("Static sets refreshed: "
-        . scalar(@$never_cidrs) . " never_block, "
-        . scalar(@$always_cidrs) . " always_block");
+        . scalar(@$never_cidrs) . " never_block (IPv4), "
+        . scalar(@$never_cidrs_v6) . " never_block_v6 (IPv6), "
+        . scalar(@$always_cidrs) . " always_block (IPv4), "
+        . scalar(@$always_cidrs_v6) . " always_block_v6 (IPv6)");
 }
 
 =head2 _initial_load_blocked_ips
@@ -2348,7 +2390,12 @@ sub _remote_addresses {
         my $msg   = ref($entry) eq 'HASH' ? $entry->{msg} : $entry;
 
         my @found_ips;
+        # Extract IPv4 addresses
         while ($msg =~ /$RE{net}{IPv4}/g) {
+            push @found_ips, $&;
+        }
+        # Extract IPv6 addresses
+        while ($msg =~ /$RE{net}{IPv6}/g) {
             push @found_ips, $&;
         }
 
