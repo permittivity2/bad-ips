@@ -139,13 +139,24 @@ update_versions() {
     sed -i "s/^our \$VERSION = '[0-9.]*';/our \$VERSION = '$VERSION';/" "$SCRIPT_DIR/usr/local/lib/site_perl/BadIPs.pm"
     echo "✓ BadIPs.pm updated"
 
+    # Update version in all BadIPs submodules
+    echo "Updating BadIPs submodules..."
+    local SUBMODULE_COUNT=0
+    for module in "$SCRIPT_DIR/usr/local/lib/site_perl/BadIPs"/*.pm; do
+        if [ -f "$module" ]; then
+            sed -i "s/^our \$VERSION = '[0-9.]*';/our \$VERSION = '$VERSION';/" "$module"
+            SUBMODULE_COUNT=$((SUBMODULE_COUNT + 1))
+        fi
+    done
+    echo "✓ Updated $SUBMODULE_COUNT BadIPs submodule(s)"
+
     echo ""
     echo "Version updates complete!"
     echo ""
 
     # Show what changed
     echo "Git status:"
-    git -C "$SCRIPT_DIR" status --short | grep -E "(DEBIAN/control|man8/bad_ips.8|README.md|website/|BadIPs.pm)" || echo "  No changes detected"
+    git -C "$SCRIPT_DIR" status --short | grep -E "(DEBIAN/control|man8/bad_ips.8|README.md|website/|BadIPs)" || echo "  No changes detected"
     echo ""
 }
 
