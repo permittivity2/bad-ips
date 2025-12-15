@@ -246,7 +246,7 @@ sub pull_global_blocks {
 
     # Query for IPs blocked by other servers that are still active
     my $sql = q{
-        SELECT DISTINCT ip, expires_at
+        SELECT DISTINCT ip, expires_at, last_seen_at
         FROM jailed_ips
         WHERE originating_server != ?
           AND last_seen_at > ?
