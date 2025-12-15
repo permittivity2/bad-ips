@@ -80,12 +80,34 @@ check_nftables() {
         return 1
     fi
 
-    # Check if iptables is active
-    if command -v iptables &> /dev/null && iptables -L -n &> /dev/null; then
+    # Check if iptables (legacy) is actually in use
+    # Modern systems use iptables-nft (compatibility layer over nftables), which is fine
+    # We only warn if legacy iptables is actually being used
+    local USING_LEGACY_IPTABLES=0
+
+    # Check 1: Is iptables-legacy being used?
+    if command -v iptables-legacy &> /dev/null; then
+        # Check if there are actual legacy iptables rules
+        local LEGACY_RULES=$(iptables-legacy -L -n 2>/dev/null | grep -v "^Chain\|^target\|^$" | wc -l)
+        if [ "$LEGACY_RULES" -gt 0 ]; then
+            USING_LEGACY_IPTABLES=1
+        fi
+    fi
+
+    # Check 2: Is iptables pointing to legacy instead of nft?
+    if command -v iptables &> /dev/null && ! iptables --version 2>&1 | grep -q "nf_tables"; then
+        # iptables exists but doesn't mention nf_tables, might be legacy
+        local IPTABLES_RULES=$(iptables -L -n 2>/dev/null | grep -v "^Chain\|^target\|^$" | wc -l)
+        if [ "$IPTABLES_RULES" -gt 0 ]; then
+            USING_LEGACY_IPTABLES=1
+        fi
+    fi
+
+    if [ $USING_LEGACY_IPTABLES -eq 1 ]; then
         echo ""
-        echo -e "${YELLOW}Warning: iptables appears to be active on this system.  It may not be.  This is a shallow check.${NC}"
+        echo -e "${YELLOW}⚠️  Warning: Legacy iptables rules detected${NC}"
         echo ""
-        echo "Bad IPs requires nftables and cannot work with iptables."
+        echo "Bad IPs requires nftables. Your system appears to have active legacy iptables rules."
         echo ""
         echo "To migrate from iptables to nftables:"
         echo "  1. Export your current iptables rules:"
@@ -97,16 +119,15 @@ check_nftables() {
         echo "  3. Review and load the nftables rules:"
         echo "     sudo nft -f /tmp/nftables-rules.nft"
         echo ""
-        echo "  4. Disable iptables and enable nftables:"
-        echo "     sudo systemctl disable iptables"
-        echo "     sudo systemctl enable nftables"
-        echo ""
-        echo "  5. Reboot to ensure clean firewall state"
+        echo "  4. Switch to nftables (Debian/Ubuntu):"
+        echo "     sudo update-alternatives --set iptables /usr/sbin/iptables-nft"
+        echo "     sudo update-alternatives --set ip6tables /usr/sbin/ip6tables-nft"
         echo ""
         echo "For more information: https://wiki.nftables.org/wiki-nftables/index.php/Moving_from_iptables_to_nftables"
         echo ""
-        read -p "Do you want to continue anyway? [y/N]: " CONTINUE
+        read -p "Continue with installation anyway? [y/N]: " CONTINUE
         if [[ ! "$CONTINUE" =~ ^[Yy]$ ]]; then
+            echo "Installation cancelled."
             exit 1
         fi
     fi
@@ -991,13 +1012,13 @@ table inet badips {
 
         # IPv4
         ip saddr @never_block accept
-        ip saddr @always_block drop
-        ip saddr @badipv4 drop
+        ip saddr @always_block counter drop
+        ip saddr @badipv4 counter drop
 
         # IPv6
         ip6 saddr @never_block_v6 accept
-        ip6 saddr @always_block_v6 drop
-        ip6 saddr @badipv6 drop
+        ip6 saddr @always_block_v6 counter drop
+        ip6 saddr @badipv6 counter drop
     }
 }
 EOF

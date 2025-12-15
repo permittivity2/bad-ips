@@ -1,5 +1,5 @@
 Package: bad-ips
-Version: 3.2.1
+Version: 0.0.3
 Section: admin
 Priority: optional
 Architecture: all
