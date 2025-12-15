@@ -32,7 +32,7 @@ $Data::Dumper::Indent   = 1;
 
 my $log = get_logger("BadIPs") || die "You MUST initialize Log::Log4perl before using BadIPs module";
 
-our $VERSION = '3.2.1';
+our $VERSION = '0.0.3';
 
 # -------------------------------------------------------------------------
 # Shared state for all threads
@@ -534,11 +534,13 @@ sub _load_config {
     $accum{db_ssl_mode} //= 'disable';
 
     # Normalize comma lists
-    $accum{journal_units}      = _csv_to_array($accum{journal_units});
-    $accum{bad_conn_patterns}  = _csv_to_array($accum{bad_conn_patterns});
-    $accum{never_block_cidrs}  = _csv_to_array($accum{never_block_cidrs});
-    $accum{always_block_cidrs} = _csv_to_array($accum{always_block_cidrs});
-    $accum{file_sources}       = _csv_to_array($accum{file_sources});
+    $accum{journal_units}         = _csv_to_array($accum{journal_units});
+    $accum{bad_conn_patterns}     = _csv_to_array($accum{bad_conn_patterns});
+    $accum{never_block_cidrs}     = _csv_to_array($accum{never_block_cidrs});
+    $accum{never_block_cidrs_v6}  = _csv_to_array($accum{never_block_cidrs_v6});
+    $accum{always_block_cidrs}    = _csv_to_array($accum{always_block_cidrs});
+    $accum{always_block_cidrs_v6} = _csv_to_array($accum{always_block_cidrs_v6});
+    $accum{file_sources}          = _csv_to_array($accum{file_sources});
     $accum{public_blocklist_urls} = _csv_to_array($accum{public_blocklist_urls});
 
     return \%accum;
