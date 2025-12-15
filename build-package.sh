@@ -139,15 +139,15 @@ update_versions() {
     sed -i "s/^our \$VERSION = '[0-9.]*';/our \$VERSION = '$VERSION';/" "$SCRIPT_DIR/usr/local/lib/site_perl/BadIPs.pm"
     echo "✓ BadIPs.pm updated"
 
-    # Update version in all BadIPs submodules
+    # Update version in all BadIPs submodules (recursively find all .pm files)
     echo "Updating BadIPs submodules..."
     local SUBMODULE_COUNT=0
-    for module in "$SCRIPT_DIR/usr/local/lib/site_perl/BadIPs"/*.pm; do
-        if [ -f "$module" ]; then
+    while IFS= read -r module; do
+        if grep -q "^our \$VERSION = '[0-9.]*';" "$module" 2>/dev/null; then
             sed -i "s/^our \$VERSION = '[0-9.]*';/our \$VERSION = '$VERSION';/" "$module"
             SUBMODULE_COUNT=$((SUBMODULE_COUNT + 1))
         fi
-    done
+    done < <(find "$SCRIPT_DIR/usr/local/lib/site_perl/BadIPs" -type f -name "*.pm" 2>/dev/null)
     echo "✓ Updated $SUBMODULE_COUNT BadIPs submodule(s)"
 
     echo ""
