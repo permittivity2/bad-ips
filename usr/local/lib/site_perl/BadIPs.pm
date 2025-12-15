@@ -9,8 +9,6 @@ use File::Path qw(make_path);
 use Time::HiRes qw(time sleep);
 use POSIX qw(strftime);
 use JSON qw(decode_json);
-use DBI;
-use DBD::Pg;  # PostgreSQL driver
 use Log::Log4perl qw( get_logger );
 use Log::Log4perl::MDC;
 use Regexp::Common qw(net);
@@ -22,6 +20,8 @@ use LWP::UserAgent;
 use LWP::Protocol::file;
 use Digest::MD5 qw(md5_hex);
 use Storable qw(dclone);
+use BadIPs::NFT;
+use BadIPs::DB;
 
 use threads;
 use threads::shared;
@@ -32,7 +32,7 @@ $Data::Dumper::Indent   = 1;
 
 my $log = get_logger("BadIPs") || die "You MUST initialize Log::Log4perl before using BadIPs module";
 
-our $VERSION = '0.0.3';
+our $VERSION = '3.4.1';
 
 # -------------------------------------------------------------------------
 # Shared state for all threads
@@ -157,6 +157,24 @@ sub new {
 
     my $conf = $self->_load_config();
     $self->{conf} = $conf;
+
+    # Initialize NFT module
+    $self->{nft} = BadIPs::NFT->new(
+        table        => $conf->{nft_table},
+        family_table => $conf->{nft_family_table},
+        dry_run      => $self->{dry_run},
+    );
+
+    # Initialize DB module
+    $self->{db} = BadIPs::DB->new(
+        db_type     => $conf->{db_type} || 'postgres',
+        db_host     => $conf->{db_host},
+        db_port     => $conf->{db_port},
+        db_name     => $conf->{db_name},
+        db_user     => $conf->{db_user},
+        db_password => $conf->{db_password},
+        db_ssl_mode => $conf->{db_ssl_mode},
+    );
 
     $self->_auto_discover_sources();
     $self->_init_queues();
@@ -525,7 +543,7 @@ sub _load_config {
     $accum{graceful_shutdown_timeout}              //= 300;
 
     # PostgreSQL configuration
-    $accum{db_type}     //= 'postgresql';
+    $accum{db_type}     //= 'postgres';
     $accum{db_host}     //= 'localhost';
     $accum{db_port}     //= 5432;
     $accum{db_name}     //= 'bad_ips';
@@ -948,61 +966,48 @@ sub _join_with_timeout {
 # DB helpers (PostgreSQL only)
 # -------------------------------------------------------------------------
 
-=head2 _create_pg_connection
+=head2 _create_db_connection
 
 Description:
-    Create a new PostgreSQL DBI connection using the given configuration.
+    Create a new database connection using the BadIPs::DB module.
 
 Arguments:
     %args:
-        conf => hashref with keys:
-            db_host, db_port, db_name, db_user, db_password, db_ssl_mode
+        conf => hashref with database configuration keys
 
 Returns:
     $dbh – DBI handle on success, or undef on failure.
 
 =cut
 
-sub _create_pg_connection {
+sub _create_db_connection {
     my (%args) = @_;
     my $conf = $args{conf} || {};
 
     return undef unless $conf->{db_host} && defined $conf->{db_password};
 
-    my $dsn = sprintf(
-        "dbi:Pg:dbname=%s;host=%s;port=%s;sslmode=%s",
-        $conf->{db_name},
-        $conf->{db_host},
-        $conf->{db_port},
-        $conf->{db_ssl_mode}
+    # Create DB module instance
+    my $db = BadIPs::DB->new(
+        db_type     => $conf->{db_type} || 'postgres',
+        db_host     => $conf->{db_host},
+        db_port     => $conf->{db_port},
+        db_name     => $conf->{db_name},
+        db_user     => $conf->{db_user},
+        db_password => $conf->{db_password},
+        db_ssl_mode => $conf->{db_ssl_mode},
     );
 
-    my $dbh;
-    eval {
-        $dbh = DBI->connect(
-            $dsn,
-            $conf->{db_user},
-            $conf->{db_password},
-            {
-                RaiseError => 1,
-                AutoCommit => 1,
-                PrintError => 0,
-            }
-        );
-    };
+    # Connect to database
+    my $dbh = $db->connect();
 
-    if ($@) {
-        $log->info("Thread DB connection failed: $@");
+    unless ($dbh) {
+        $log->info("Thread DB connection failed");
         return undef;
     }
 
-    # Do a quick test query
-    eval {
-        $dbh->do("SELECT 1");
-    };
-
-    if ($@) {
-        $log->info("Thread DB test query failed: $@");
+    # Test connection
+    unless ($db->test_connection($dbh)) {
+        $log->info("Thread DB connection test failed");
         return undef;
     }
 
@@ -1036,6 +1041,7 @@ Returns:
 sub _db_upsert_blocked_ip_batch {
     my (%args) = @_;
     my $dbh   = $args{dbh}   or die "_db_upsert_blocked_ip_batch: dbh required";
+    my $db    = $args{db}    or die "_db_upsert_blocked_ip_batch: db required";
     my $conf  = $args{conf}  || {};
     my $batch = $args{batch} || [];
 
@@ -1044,42 +1050,27 @@ sub _db_upsert_blocked_ip_batch {
     my $hostname = $conf->{hostname} || hostname();
     chomp $hostname;
 
-    my $sql = "INSERT INTO jailed_ips (
-        ip, originating_server, originating_service, detector_name,
-        pattern_matched, matched_log_line,
-        first_blocked_at, last_seen_at, expires_at, block_count
-    ) VALUES ";
-
-    my @placeholders;
-    my @values;
-
     my $now = int(time());
 
+    # Transform batch to format expected by DB module
+    my @rows;
     for my $item (@$batch) {
-        push @placeholders, "(?, ?, ?, ?, ?, ?, ?, ?, ?, 1)";
-        push @values,
-            $item->{ip},
-            $hostname,
-            $item->{source}   || 'unknown',
-            $item->{detector} || 'unknown',
-            'unknown',  # pattern_matched
-            substr($item->{log_line} || '', 0, 500),
-            $now,
-            $now,
-            int($item->{expires_at});
+        push @rows, {
+            ip                  => $item->{ip},
+            originating_server  => $hostname,
+            originating_service => $item->{source}   || 'unknown',
+            detector_name       => $item->{detector} || 'unknown',
+            pattern_matched     => 'unknown',
+            matched_log_line    => substr($item->{log_line} || '', 0, 500),
+            first_blocked_at    => $now,
+            last_seen_at        => $now,
+            expires_at          => int($item->{expires_at}),
+            block_count         => 1,
+        };
     }
 
-    $sql .= join(", ", @placeholders);
-    $sql .= " ON CONFLICT(ip, originating_server) DO UPDATE SET
-        last_seen_at   = excluded.last_seen_at,
-        expires_at     = excluded.expires_at,
-        block_count    = jailed_ips.block_count + 1,
-        pattern_matched= excluded.pattern_matched,
-        matched_log_line = excluded.matched_log_line";
-
-    $log->debug("central_db_sync_thread: executing batch INSERT with " . scalar(@$batch) . " rows");
-    my $sth = $dbh->prepare($sql);
-    $sth->execute(@values);
+    $log->debug("central_db_sync_thread: executing batch INSERT with " . scalar(@rows) . " rows");
+    $db->upsert_blocked_ip_batch($dbh, \@rows);
 }
 
 # -------------------------------------------------------------------------
@@ -1119,6 +1110,13 @@ sub _worker_nft_blocker {
 
     Log::Log4perl::MDC->put("THREAD" => $thread_name);
 
+    # Create NFT instance for this thread
+    my $nft = BadIPs::NFT->new(
+        table        => $conf->{nft_table},
+        family_table => $conf->{nft_family_table},
+        dry_run      => $dry_run,
+    );
+
     my %blocked_in_thread;
 
     $log->info("nft_blocker_thread started (table=$fam, family_table=$tab, set=$set, ttl=$ttl)");
@@ -1132,7 +1130,7 @@ sub _worker_nft_blocker {
         my $res = _nft_block_ip(
             ip   => $item->{ip},
             ttl  => $ttl,
-            conf => $conf,
+            nft  => $nft,
         );
 
         if ($res->{ok}) {
@@ -1249,34 +1247,10 @@ sub _nft_block_ip {
     my (%args) = @_;
     my $ip     = $args{ip};
     my $ttl    = $args{ttl};
-    my $conf   = $args{conf};
+    my $nft    = $args{nft};
 
-    # Detect IPv6 (contains colons) vs IPv4 and use appropriate set
-    my $set = ($ip =~ /:/) ? 'badipv6' : 'badipv4';
-
-    my $cmd = "nft add element $conf->{nft_table} $conf->{nft_family_table} $set { $ip timeout ${ttl}s }";
-
-    if ($conf->{dry_run}) {
-        my $exp = time() + $ttl;
-        return { ok => 1, expires => $exp, dry_run => 1 };
-    }
-
-    my ($out, $rc);
-    eval {
-        $out = qx($cmd 2>&1);
-        $rc  = $? >> 8;
-    };
-    if ($@) {
-        return { ok => 0, err => "Command execution ( command: $cmd ) failed with output ( $out ).  Eval error: $@",
-                rc => -1 };
-    }
-
-    if ($rc == 0) {
-        my $exp = time() + $ttl;
-        return { ok => 1, expires => $exp, out => $out };
-    }
-
-    return { ok => 0, err => $out, rc => $rc };
+    # Delegate to BadIPs::NFT module
+    return $nft->block_ip(ip => $ip, ttl => $ttl);
 }
 
 =head2 _worker_central_db_sync
@@ -1307,7 +1281,18 @@ sub _worker_central_db_sync {
 
     Log::Log4perl::MDC->put("THREAD" => $thread_name);
 
-    my $dbh = _create_pg_connection(conf => $conf);
+    # Create DB module instance for this thread
+    my $db = BadIPs::DB->new(
+        db_type     => $conf->{db_type} || 'postgres',
+        db_host     => $conf->{db_host},
+        db_port     => $conf->{db_port},
+        db_name     => $conf->{db_name},
+        db_user     => $conf->{db_user},
+        db_password => $conf->{db_password},
+        db_ssl_mode => $conf->{db_ssl_mode},
+    );
+
+    my $dbh = $db->connect();
     unless ($dbh) {
         $log->warn("central_db_sync_thread: no database connection, exiting");
         return;
@@ -1334,6 +1319,7 @@ sub _worker_central_db_sync {
         eval {
             _db_upsert_blocked_ip_batch(
                 dbh   => $dbh,
+                db    => $db,
                 conf  => $conf,
                 batch => \@batch,
             );
@@ -1377,9 +1363,20 @@ sub _worker_pull_global_blocks {
     my $conf = $args{conf} || {};
     my $thread_name = $args{thread_name} ||  (caller(0))[3];
 
-    Log::Log4perl::MDC->put("THREAD" => $thread_name);    
+    Log::Log4perl::MDC->put("THREAD" => $thread_name);
 
-    my $dbh = _create_pg_connection(conf => $conf);
+    # Create DB module instance for this thread
+    my $db = BadIPs::DB->new(
+        db_type     => $conf->{db_type} || 'postgres',
+        db_host     => $conf->{db_host},
+        db_port     => $conf->{db_port},
+        db_name     => $conf->{db_name},
+        db_user     => $conf->{db_user},
+        db_password => $conf->{db_password},
+        db_ssl_mode => $conf->{db_ssl_mode},
+    );
+
+    my $dbh = $db->connect();
     unless ($dbh) {
         $log->warn("pull_global_blocks_thread: no database connection, exiting");
         return;
@@ -1401,20 +1398,15 @@ sub _worker_pull_global_blocks {
         my $new_blocks = 0;
 
         eval {
-            my $sth = $dbh->prepare(
-                "SELECT ip, originating_server, originating_service, detector_name
-                 FROM jailed_ips
-                 WHERE originating_server != ?
-                 AND last_seen_at > ?"
-            );
-            $sth->execute($hostname, int($last_check));
+            # Use DB module to pull global blocks
+            my $blocks = $db->pull_global_blocks($dbh, $hostname, $last_check);
 
-            while (my $row = $sth->fetchrow_hashref) {
+            for my $block (@$blocks) {
                 $new_blocks++;
                 $ips_to_block_queue->enqueue({
-                    ip       => $row->{ip},
-                    source   => "central_db:$row->{originating_server}",
-                    detector => $row->{detector_name} || 'global_sync',
+                    ip       => $block->{ip},
+                    source   => "central_db:global_sync",
+                    detector => 'global_sync',
                     line     => undef,
                 });
             }
@@ -1689,84 +1681,13 @@ Returns:
 sub _refresh_static_nftables_sets {
     my ($self) = @_;
 
-    my $table        = $self->{conf}->{nft_table};
-    my $family_table = $self->{conf}->{nft_family_table};
-
-    # IPv4 never_block
-    $log->info("Refreshing never_block (IPv4) nftables set");
-    my $never_cidrs = $self->{conf}->{never_block_cidrs} || [];
-
-    system("nft flush set $table $family_table never_block 2>/dev/null");
-
-    for my $cidr (@$never_cidrs) {
-        next unless $cidr;
-        $cidr =~ s/^\s+|\s+$//g;
-        next unless $cidr;
-        my $rc = system("nft add element $table $family_table never_block { $cidr } 2>/dev/null");
-        if ($rc == 0) {
-            $log->debug("Added $cidr to never_block set");
-        } else {
-            $log->info("Failed to add $cidr to never_block set");
-        }
-    }
-
-    # IPv6 never_block
-    $log->info("Refreshing never_block_v6 (IPv6) nftables set");
-    my $never_cidrs_v6 = $self->{conf}->{never_block_cidrs_v6} || [];
-
-    system("nft flush set $table $family_table never_block_v6 2>/dev/null");
-
-    for my $cidr (@$never_cidrs_v6) {
-        next unless $cidr;
-        $cidr =~ s/^\s+|\s+$//g;
-        next unless $cidr;
-        my $rc = system("nft add element $table $family_table never_block_v6 { $cidr } 2>/dev/null");
-        if ($rc == 0) {
-            $log->debug("Added $cidr to never_block_v6 set");
-        } else {
-            $log->info("Failed to add $cidr to never_block_v6 set");
-        }
-    }
-
-    # IPv4 always_block
-    $log->info("Refreshing always_block (IPv4) nftables set");
-    my $always_cidrs = $self->{conf}->{always_block_cidrs} || [];
-    system("nft flush set $table $family_table always_block 2>/dev/null");
-
-    for my $cidr (@$always_cidrs) {
-        next unless $cidr;
-        $cidr =~ s/^\s+|\s+$//g;
-        next unless $cidr;
-        my $rc = system("nft add element $table $family_table always_block { $cidr } 2>/dev/null");
-        if ($rc == 0) {
-            $log->debug("Added $cidr to always_block set");
-        } else {
-            $log->info("Failed to add $cidr to always_block set");
-        }
-    }
-
-    # IPv6 always_block
-    $log->info("Refreshing always_block_v6 (IPv6) nftables set");
-    my $always_cidrs_v6 = $self->{conf}->{always_block_cidrs_v6} || [];
-    system("nft flush set $table $family_table always_block_v6 2>/dev/null");
-
-    for my $cidr (@$always_cidrs_v6) {
-        next unless $cidr;
-        $cidr =~ s/^\s+|\s+$//g;
-        next unless $cidr;
-        my $rc = system("nft add element $table $family_table always_block_v6 { $cidr } 2>/dev/null");
-        if ($rc == 0) {
-            $log->debug("Added $cidr to always_block_v6 set");
-        } else {
-            $log->info("Failed to add $cidr to always_block_v6 set");
-        }
-    }
-
-    $log->info("Static sets refreshed: "
-        . scalar(@$never_cidrs) . " never_block (IPv4), "
-        . scalar(@$never_cidrs_v6) . " never_block_v6 (IPv6), "
-        . scalar(@$always_cidrs) . " always_block (IPv4), "
-        . scalar(@$always_cidrs_v6) . " always_block_v6 (IPv6)");
+    # Delegate to BadIPs::NFT module
+    $self->{nft}->refresh_static_sets(
+        never_block_cidrs     => $self->{conf}->{never_block_cidrs},
+        never_block_cidrs_v6  => $self->{conf}->{never_block_cidrs_v6},
+        always_block_cidrs    => $self->{conf}->{always_block_cidrs},
+        always_block_cidrs_v6 => $self->{conf}->{always_block_cidrs_v6},
+    );
 }
 
 =head2 _initial_load_blocked_ips
@@ -1818,8 +1739,8 @@ Returns:
 
 sub _nft_as_json {
     my ($self) = @_;
-    my $out = `nft -j list ruleset`;
-    return decode_json($out);
+    # Delegate to BadIPs::NFT module
+    return $self->{nft}->ruleset_as_json();
 }
 
 =head2 _remove_expired_ips
