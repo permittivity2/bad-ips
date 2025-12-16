@@ -32,7 +32,7 @@ $Data::Dumper::Indent   = 1;
 
 my $log = get_logger("BadIPs") || die "You MUST initialize Log::Log4perl before using BadIPs module";
 
-our $VERSION = '3.4.3';
+our $VERSION = '3.4.7';
 
 # -------------------------------------------------------------------------
 # Shared state for all threads
@@ -274,6 +274,7 @@ sub run {
                 ip       => $item->{ip},
                 source   => $item->{metadata}->{service}  || 'unknown',
                 detector => $item->{metadata}->{detector} || 'unknown',
+                pattern  => $item->{metadata}->{pattern}  || 'unknown',
                 line     => $item->{metadata}->{log_line},
             });
             $new_since_hb{$item->{ip}} = 1;
@@ -490,16 +491,76 @@ sub _load_config {
     }
 
     my %accum;
+    my @detector_units;
+    my @detector_patterns;
+    my @detector_files;
+
     for my $f (@files) {
         my $c = Config::Tiny->read($f);
         next unless $c;
 
+        # Process [global] section
         if (my $g = $c->{global}) {
             %accum = (%accum, %$g);
         }
+
+        # Process [host:hostname] section
         if (my $h = $c->{"host:$host"}) {
             %accum = (%accum, %$h);
         }
+
+        # Process [detector:*] sections
+        for my $section (keys %$c) {
+            if ($section =~ /^detector:(.+)/) {
+                my $detector_name = $1;
+                my $d = $c->{$section};
+
+                # Collect units from this detector
+                if ($d->{units}) {
+                    push @detector_units, split(/\s*,\s*/, $d->{units});
+                }
+
+                # Collect file sources from this detector
+                if ($d->{files}) {
+                    push @detector_files, split(/\s*,\s*/, $d->{files});
+                }
+
+                # Collect patterns from this detector (pattern1, pattern2, etc.)
+                for my $key (sort keys %$d) {
+                    if ($key =~ /^pattern\d+$/) {
+                        push @detector_patterns, $d->{$key};
+                    }
+                }
+
+                $log->debug("Loaded detector: $detector_name") if $log;
+            }
+        }
+    }
+
+    # Merge detector configurations with global config
+    # If detectors provided units, override/extend the global journal_units
+    if (@detector_units) {
+        # Remove duplicates while preserving order
+        my %seen;
+        my @unique_units = grep { !$seen{$_}++ } @detector_units;
+        $accum{journal_units} = join(',', @unique_units);
+        $log->info("Loaded " . scalar(@unique_units) . " systemd units from detectors: " . join(', ', @unique_units)) if $log;
+    }
+
+    # If detectors provided file sources, override/extend the global file_sources
+    if (@detector_files) {
+        my %seen;
+        my @unique_files = grep { !$seen{$_}++ } @detector_files;
+        $accum{file_sources} = join(',', @unique_files);
+        $log->info("Loaded " . scalar(@unique_files) . " file sources from detectors") if $log;
+    }
+
+    # If detectors provided patterns, override/extend the global bad_conn_patterns
+    if (@detector_patterns) {
+        my %seen;
+        my @unique_patterns = grep { !$seen{$_}++ } @detector_patterns;
+        $accum{bad_conn_patterns} = join(',', @unique_patterns);
+        $log->info("Loaded " . scalar(@unique_patterns) . " patterns from detectors") if $log;
     }
 
     # Core defaults
@@ -1060,7 +1121,7 @@ sub _db_upsert_blocked_ip_batch {
             originating_server  => $hostname,
             originating_service => $item->{source}   || 'unknown',
             detector_name       => $item->{detector} || 'unknown',
-            pattern_matched     => 'unknown',
+            pattern_matched     => $item->{pattern} || 'unknown',
             matched_log_line    => substr($item->{log_line} || '', 0, 500),
             first_blocked_at    => $now,
             last_seen_at        => $now,
@@ -1197,6 +1258,7 @@ Arguments:
                         ip         => 'x.x.x.x',
                         source     => 'service',
                         detector   => 'detector',
+                        pattern    => 'matched pattern',
                         line       => 'original line',
         expires => epoch time when block expires
 Returns:
@@ -1212,6 +1274,7 @@ sub _enqueue_central_db_update {
         expires_at => $expires,
         source     => $item->{source},
         detector   => $item->{detector},
+        pattern    => $item->{pattern},
         log_line   => $item->{line},
     };
 

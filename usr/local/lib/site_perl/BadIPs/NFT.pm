@@ -5,13 +5,20 @@ use warnings;
 use JSON;
 use Log::Log4perl qw(get_logger);
 
-our $VERSION = '3.4.3';
+our $VERSION = '3.4.7';
 
 my $log = get_logger("BadIPs::NFT");
 
+# Acceptable nft error messages and their log levels
+# These errors are non-fatal and should be logged at the specified level
+my %nft_acceptable_errors = (
+    "interval overlaps with an existing one" => "info",  # IP/CIDR already in set
+    "Could not process rule: No such file or directory" => "warn",  # Set doesn't exist (shouldn't happen but not fatal)
+);
+
 =head1 NAME
 
-BadIPs::NFT - nftables integration for Bad IPs
+BadIPs::NFT - nftables integration for Bad IPs 
 
 =head1 SYNOPSIS
 
@@ -134,6 +141,23 @@ sub block_ip {
         return { ok => 1, expires => $exp, out => $out };
     }
 
+    # Check if this is an acceptable error (non-fatal)
+    my ($ok, $level, $pattern) = _check_nft_error($out, $rc);
+
+    if ($ok) {
+        # Acceptable error - log at appropriate level and treat as success
+        my $exp = time() + $ttl;
+        if ($level eq 'info') {
+            $log->info("Blocked $ip (acceptable condition: $pattern)");
+        } elsif ($level eq 'debug') {
+            $log->debug("Blocked $ip (acceptable condition: $pattern)");
+        } elsif ($level eq 'warn') {
+            $log->warn("Blocked $ip (acceptable condition: $pattern)");
+        }
+        return { ok => 1, expires => $exp, out => $out, acceptable_error => $pattern };
+    }
+
+    # Real error - log and return failure
     $log->warn("Failed to block $ip: $out (rc: $rc)");
     return { ok => 0, err => $out, rc => $rc };
 }
@@ -220,6 +244,40 @@ sub ruleset_as_json {
     return $json;
 }
 
+=head2 _check_nft_error (private)
+
+Internal helper to check if an nft error is acceptable (non-fatal).
+
+Arguments:
+    $out => Command output/error message
+    $rc  => Return code
+
+Returns:
+    ($ok, $level, $pattern) where:
+        $ok      => 1 if acceptable error, 0 if real error
+        $level   => Log level to use ('info', 'debug', 'warn', 'error')
+        $pattern => Matched error pattern (undef if real error)
+
+=cut
+
+sub _check_nft_error {
+    my ($out, $rc) = @_;
+
+    # Return code 0 = success, always OK
+    return (1, 'debug', 'success') if $rc == 0;
+
+    # Check if error message contains any acceptable patterns
+    for my $pattern (keys %nft_acceptable_errors) {
+        if ($out =~ /\Q$pattern\E/i) {
+            my $level = $nft_acceptable_errors{$pattern};
+            return (1, $level, $pattern);
+        }
+    }
+
+    # Unrecognized error
+    return (0, 'error', undef);
+}
+
 =head2 _refresh_set (private)
 
 Internal helper to refresh a single nftables set.
@@ -254,11 +312,28 @@ sub _refresh_set {
             next;
         }
 
-        my $rc = system("$cmd 2>/dev/null");
+        my $out = qx($cmd 2>&1);
+        my $rc = $? >> 8;
+
         if ($rc == 0) {
             $log->debug("Added $cidr to $set_name set");
         } else {
-            $log->warn("Failed to add $cidr to $set_name set");
+            # Check if this is an acceptable error
+            my ($ok, $level, $pattern) = _check_nft_error($out, $rc);
+
+            if ($ok) {
+                # Acceptable error - log at appropriate level
+                if ($level eq 'info') {
+                    $log->info("Added $cidr to $set_name set (acceptable condition: $pattern)");
+                } elsif ($level eq 'debug') {
+                    $log->debug("Added $cidr to $set_name set (acceptable condition: $pattern)");
+                } elsif ($level eq 'warn') {
+                    $log->warn("Added $cidr to $set_name set (acceptable condition: $pattern)");
+                }
+            } else {
+                # Real error
+                $log->warn("Failed to add $cidr to $set_name set: $out (rc: $rc)");
+            }
         }
     }
 }
