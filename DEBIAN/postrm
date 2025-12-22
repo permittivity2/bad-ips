@@ -1,12 +1,33 @@
 #!/bin/bash
 set -e
 
+# Load service user configuration if exists
+if [ -f /etc/default/bad_ips ]; then
+    . /etc/default/bad_ips
+fi
+BADIPS_USER=${BADIPS_USER:-badips}
+BADIPS_GROUP=${BADIPS_GROUP:-badips}
+
 case "$1" in
     purge)
+        echo "Purging Bad IPs configuration and user..."
+
         # Remove database directory on purge
         if [ -d /var/lib/bad_ips ]; then
             echo "Removing database directory /var/lib/bad_ips"
             rm -rf /var/lib/bad_ips
+        fi
+
+        # Remove log directory on purge
+        if [ -d /var/log/bad_ips ]; then
+            echo "Removing log directory /var/log/bad_ips"
+            rm -rf /var/log/bad_ips
+        fi
+
+        # Remove cache directory on purge
+        if [ -d /var/cache/badips ]; then
+            echo "Removing cache directory /var/cache/badips"
+            rm -rf /var/cache/badips
         fi
 
         # Clean up nftables rules and sets
@@ -26,10 +47,59 @@ case "$1" in
         nft delete set inet filter badipv4 2>/dev/null || true
 
         echo "✓ nftables configuration cleaned up"
+
+        # Remove sudoers configuration
+        if [ -f /etc/sudoers.d/bad_ips ]; then
+            echo "Removing sudoers configuration"
+            rm -f /etc/sudoers.d/bad_ips
+            echo "✓ Sudoers configuration removed"
+        fi
+
+        # Remove systemd drop-in directory
+        if [ -d /etc/systemd/system/bad_ips.service.d ]; then
+            echo "Removing systemd drop-in configuration"
+            rm -rf /etc/systemd/system/bad_ips.service.d
+            echo "✓ Systemd drop-in removed"
+        fi
+
+        # Remove service user configuration
+        if [ -f /etc/default/bad_ips ]; then
+            echo "Removing service user configuration"
+            rm -f /etc/default/bad_ips
+            echo "✓ Service user configuration removed"
+        fi
+
+        # Remove service user and group
+        if getent passwd "$BADIPS_USER" > /dev/null; then
+            echo "Removing system user: $BADIPS_USER"
+            deluser --system "$BADIPS_USER" 2>/dev/null || true
+            echo "✓ System user removed"
+        fi
+
+        # Remove group if it still exists and is empty
+        if getent group "$BADIPS_GROUP" > /dev/null 2>&1; then
+            delgroup --system "$BADIPS_GROUP" 2>/dev/null || true
+        fi
+
+        echo "✓ Bad IPs purge complete"
         ;;
 
     remove|upgrade|failed-upgrade|abort-install|abort-upgrade|disappear)
-        # Do nothing on remove/upgrade - keep database intact
+        # On remove (but not purge), clean up systemd and sudoers but keep database/logs
+        if [ "$1" = "remove" ]; then
+            # Remove sudoers configuration on remove
+            if [ -f /etc/sudoers.d/bad_ips ]; then
+                echo "Removing sudoers configuration"
+                rm -f /etc/sudoers.d/bad_ips
+            fi
+
+            # Remove systemd drop-in on remove
+            if [ -d /etc/systemd/system/bad_ips.service.d ]; then
+                echo "Removing systemd drop-in configuration"
+                rm -rf /etc/systemd/system/bad_ips.service.d
+            fi
+        fi
+        # Do nothing on upgrade - keep everything intact
         ;;
 
     *)

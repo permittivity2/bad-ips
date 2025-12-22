@@ -9,9 +9,9 @@ cd "$(dirname "$0")"
 echo "Updating apt repository..."
 echo ""
 
-# Generate Packages files
+# Generate Packages files (with --multiversion to include all package versions)
 echo "Generating Packages files..."
-dpkg-scanpackages pool/ /dev/null > Packages
+dpkg-scanpackages --multiversion pool/ /dev/null > Packages
 gzip -9c Packages > Packages.gz
 echo "✓ Packages files generated"
 echo ""

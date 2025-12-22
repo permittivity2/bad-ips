@@ -116,6 +116,7 @@
                 <li><a href="#database">Database Configuration</a></li>
                 <li><a href="#detectors">Detector Configuration</a></li>
                 <li><a href="#patterns">Pattern Matching</a></li>
+                <li><a href="#plugins">Public Blocklist Plugins</a></li>
             </ul>
         </div>
 
@@ -190,15 +191,15 @@
                     <td>Max seconds to wait before processing queued IPs (regardless of batch size)</td>
                     <td>5</td>
                 </tr>
-                <tr>
-                    <td><code>public_blocklist_urls</code></td>
-                    <td>Comma-separated list of URLs to fetch blocklists from (HTTP/HTTPS/file://)</td>
-                    <td><em>Optional</em></td>
+                <tr style="opacity: 0.5;">
+                    <td><code><del>public_blocklist_urls</del></code></td>
+                    <td><del>Comma-separated list of URLs to fetch blocklists from (HTTP/HTTPS/file://)</del><br><span style="color: #ff6b6b; font-weight: bold;">⚠️ DEPRECATED in v3.5+</span> - Use <a href="#plugins">PublicBlocklistPlugins</a> instead</td>
+                    <td><del><em>Optional</em></del></td>
                 </tr>
-                <tr>
-                    <td><code>public_blocklist_refresh</code></td>
-                    <td>How often to refresh public blocklists (seconds)</td>
-                    <td>900 (15 minutes)</td>
+                <tr style="opacity: 0.5;">
+                    <td><code><del>public_blocklist_refresh</del></code></td>
+                    <td><del>How often to refresh public blocklists (seconds)</del><br><span style="color: #ff6b6b; font-weight: bold;">⚠️ DEPRECATED in v3.5+</span> - Use <a href="#plugins">PublicBlocklistPlugins</a> instead</td>
+                    <td><del>900 (15 minutes)</del></td>
                 </tr>
                 <tr>
                     <td><code>heartbeat</code></td>
@@ -259,18 +260,18 @@ central_db_batch_size = 20
 #  The higher the number, the less stress on the database with low count inserts
 central_db_queue_timeout = 5
 
+# ⚠️ DEPRECATED in v3.5+ - Use [PublicBlocklistPlugins:Name] sections instead
 # public_blocklist_urls (comma separated list)
-# List of sites where a static text list can be retrieved of IPs to block 
+# List of sites where a static text list can be retrieved of IPs to block
 # Public lists are cached to a local file (see public_blocklist_refresh)
 # You can use a local file, too, doing something like: file:///block/these/annoying_ips.txt
 #  That way you can generate your own list of IPs and IP+Subnets
-public_blocklist_urls = https://www.spamhaus.org/drop/drop.txt, https://feodotracker.abuse.ch/downloads/ipblocklist.txt
+# public_blocklist_urls = https://www.spamhaus.org/drop/drop.txt, https://feodotracker.abuse.ch/downloads/ipblocklist.txt
 # public_blocklist_refresh (seconds):
 # How often to refresh above list.  Honors ETag and not-before headers.
-# If you are kinda doing some debug and constantly stopping and starting, then the cached file will be used until 
+# If you are kinda doing some debug and constantly stopping and starting, then the cached file will be used until
 # it is <public_blocklist_refresh> seconds old
-public_blocklist_refresh = 900
-
+# public_blocklist_refresh = 900
 
 # heartbeat (seconds): 
 #  How often to produce a log entry with some cursory info
@@ -530,6 +531,205 @@ pattern3 = query failed \(SERVFAIL\)</div>
             <p>Runs Bad IPs in detection-only mode. IPs are identified but not blocked.</p>
         </div>
 
+        <div class="card" id="plugins">
+            <h2>Public Blocklist Plugins</h2>
+            <p>Bad IPs supports extensible public blocklist plugins that fetch and process IP blocklists from external sources. A Spamhaus plugin is included by default, and you can develop custom plugins for any blocklist source.</p>
+
+            <h3>Configuration</h3>
+            <p>Plugins are configured in <code>/usr/local/etc/badips.conf</code> using the <code>[PublicBlocklistPlugins:PluginName]</code> section format:</p>
+
+            <div class="code-block">[PublicBlocklistPlugins:Spamhaus]
+urls = https://www.spamhaus.org/drop/drop.txt, https://www.spamhaus.org/drop/edrop.txt
+fetch_interval = 3600
+use_cache = 1
+cache_path = /var/cache/badips/
+active = 1
+
+[PublicBlocklistPlugins:Feodotracker]
+urls = https://feodotracker.abuse.ch/downloads/ipblocklist.txt
+fetch_interval = 7200
+use_cache = 1
+cache_path = /var/cache/badips/
+active = 0</div>
+
+            <div class="alert">
+                <strong>⚠️ Configuration Requirements:</strong>
+                <ul style="margin-top: 10px;">
+                    <li>A configuration section <code>[PublicBlocklistPlugins:&lt;plugin_name&gt;]</code> <strong>must exist</strong> for each plugin</li>
+                    <li>The <code>&lt;plugin_name&gt;</code> must <strong>exactly match</strong> the package name and module file name</li>
+                    <li>The <strong>only required parameter</strong> is <code>active</code></li>
+                    <li>If <code>active</code> does not exist or is set to <code>0</code>, the plugin is <strong>not loaded</strong></li>
+                    <li>All other parameters are optional and plugin-specific</li>
+                </ul>
+            </div>
+
+            <h3>Built-in Plugins</h3>
+            <p>The <strong>Spamhaus</strong> plugin is included with Bad IPs and provides access to the Spamhaus DROP and EDROP lists. Additional plugins can be found in the template configuration or developed custom.</p>
+
+            <h3>Developing Custom Plugins</h3>
+            <p>You can develop your own blocklist plugins to integrate any external IP list source. Custom plugins must follow the BadIPs plugin architecture:</p>
+
+            <h4>Package Structure</h4>
+            <div class="alert">
+                <strong>⚠️ Important:</strong> Plugin package names must follow the format: <code>BadIPs::PublicBlocklistPlugins::&lt;PluginName&gt;</code>
+            </div>
+            <p>For example, a custom plugin named "MyBlocklist" would be:</p>
+            <ul>
+                <li><strong>Package name:</strong> <code>BadIPs::PublicBlocklistPlugins::MyBlocklist</code></li>
+                <li><strong>File location:</strong> <code>/usr/local/lib/site_perl/BadIPs/PublicBlocklistPlugins/MyBlocklist.pm</code></li>
+                <li><strong>Configuration section:</strong> <code>[PublicBlocklistPlugins:MyBlocklist]</code></li>
+            </ul>
+
+            <h4>Required Methods</h4>
+
+            <h5>1. Constructor: new()</h5>
+            <p>The <code>new()</code> method must instantiate your plugin class and will receive the following arguments:</p>
+
+            <table>
+                <tr>
+                    <th>Argument</th>
+                    <th>Type</th>
+                    <th>Description</th>
+                </tr>
+                <tr>
+                    <td><code>conf</code></td>
+                    <td>HashRef</td>
+                    <td>Complete configuration hash including your plugin's <code>[PublicBlocklistPlugins:Name]</code> section</td>
+                </tr>
+                <tr>
+                    <td><code>reload_check</code></td>
+                    <td>CodeRef</td>
+                    <td>Function reference to check if reload has been requested. Returns boolean.</td>
+                </tr>
+                <tr>
+                    <td><code>shutdown_check</code></td>
+                    <td>CodeRef</td>
+                    <td>Function reference to check if shutdown has been requested. Returns boolean.</td>
+                </tr>
+                <tr>
+                    <td><code>enqueue_ip</code></td>
+                    <td>CodeRef</td>
+                    <td>Function reference to enqueue discovered IPs for blocking. Accepts an IP item hashref.</td>
+                </tr>
+                <tr>
+                    <td><code>log</code></td>
+                    <td>Object</td>
+                    <td>Log::Log4perl logger object for your plugin</td>
+                </tr>
+            </table>
+
+            <h5>2. Run Method: run()</h5>
+            <p>The <code>run()</code> method is where your plugin's main logic executes. This method:</p>
+            <ul>
+                <li>Takes <strong>no arguments</strong></li>
+                <li>Runs in its own thread</li>
+                <li>Should loop continuously, checking <code>shutdown_check</code> and <code>reload_check</code></li>
+                <li>Calls <code>enqueue_ip</code> to submit discovered IPs for blocking</li>
+            </ul>
+
+            <h4>Example Plugin Skeleton</h4>
+            <div class="code-block">package BadIPs::PublicBlocklistPlugins::MyBlocklist;
+
+use strict;
+use warnings;
+use LWP::UserAgent;
+
+sub new {
+    my ($class, %args) = @_;
+
+    my $self = {
+        conf           => $args{conf},
+        reload_check   => $args{reload_check},
+        shutdown_check => $args{shutdown_check},
+        enqueue_ip     => $args{enqueue_ip},
+        log            => $args{log},
+    };
+
+    bless $self, $class;
+    return $self;
+}
+
+sub run {
+    my ($self) = @_;
+
+    my $log = $self->{log};
+    my $plugin_conf = $self->{conf}{PublicBlocklistPlugins}{MyBlocklist};
+
+    $log->info("MyBlocklist plugin started");
+
+    while (!$self->{shutdown_check}->()) {
+        # Check for reload request
+        if ($self->{reload_check}->()) {
+            $log->info("Reload requested, restarting...");
+            return;
+        }
+
+        # Fetch blocklist
+        my $ua = LWP::UserAgent->new;
+        my $response = $ua->get($plugin_conf->{url});
+
+        if ($response->is_success) {
+            my @ips = split /\n/, $response->content;
+
+            foreach my $ip (@ips) {
+                next if $ip =~ /^#/;  # Skip comments
+                $ip =~ s/\s.*//;      # Remove trailing comments
+
+                # Enqueue IP for blocking
+                $self->{enqueue_ip}->({
+                    ip                  => $ip,
+                    originating_service => 'MyBlocklist',
+                    detector_name       => 'MyBlocklist',
+                    pattern_matched     => 'Public blocklist',
+                });
+            }
+
+            $log->info("Processed blocklist, found " . scalar(@ips) . " IPs");
+        } else {
+            $log->error("Failed to fetch blocklist: " . $response->status_line);
+        }
+
+        # Sleep before next fetch
+        sleep($plugin_conf->{fetch_interval} || 3600);
+    }
+
+    $log->info("MyBlocklist plugin shutting down");
+    return 1;
+}
+
+1;</div>
+
+            <h4>Plugin Configuration</h4>
+            <p>After creating your plugin, add its configuration to <code>/usr/local/etc/badips.conf</code>. The section name must match your plugin name, and <code>active = 1</code> is the only required parameter:</p>
+            <div class="code-block">[PublicBlocklistPlugins:MyBlocklist]
+# Required parameter - plugin will not load without this
+active = 1
+
+# Optional plugin-specific parameters
+url = https://example.com/blocklist.txt
+fetch_interval = 3600</div>
+
+            <div class="alert info">
+                <strong>💡 Notes:</strong>
+                <ul style="margin-top: 10px; margin-bottom: 0;">
+                    <li>The section name <code>[PublicBlocklistPlugins:MyBlocklist]</code> must <strong>exactly match</strong> your module file name (<code>MyBlocklist.pm</code>)</li>
+                    <li><code>active = 1</code> is the <strong>only required parameter</strong>. If missing or set to <code>0</code>, the plugin will not load.</li>
+                    <li>All other parameters are optional and defined by your plugin</li>
+                    <li>Access parameters via <code>$self->{conf}{PublicBlocklistPlugins}{MyBlocklist}{param_name}</code></li>
+                </ul>
+            </div>
+
+            <h4>Best Practices</h4>
+            <ul>
+                <li><strong>Respect fetch intervals:</strong> Don't hammer external services</li>
+                <li><strong>Handle errors gracefully:</strong> Log errors and continue operation</li>
+                <li><strong>Check shutdown frequently:</strong> Allow clean service stops</li>
+                <li><strong>Use caching:</strong> Implement local caching to reduce bandwidth</li>
+                <li><strong>Validate IPs:</strong> Ensure fetched data contains valid IP addresses/CIDRs</li>
+                <li><strong>Honor reload:</strong> Exit run() when reload_check returns true</li>
+            </ul>
+        </div>
+
         <div class="card">
             <h2>Service Management</h2>
             <h3>Common Commands</h3>
@@ -558,8 +758,8 @@ sudo nft list set inet filter badipv4</div>
     </div>
 
     <footer>
-        <p><a href="index.html">← Back to Main</a></p>
-        <p>Bad IPs v3.4.7 - Silver Linings, LLC</p>
+        <p><a href="index.html">← Back to Main</a> | <a href="changelog.html">Changelog</a></p>
+        <p>Bad IPs v3.5.0 - Silver Linings, LLC</p>
     </footer>
 </body>
 </html>
