@@ -5,7 +5,7 @@ use warnings;
 use JSON;
 use Log::Log4perl qw(get_logger);
 
-our $VERSION = '3.4.7';
+our $VERSION = '3.5.0';
 
 my $log = get_logger("BadIPs::NFT");
 
@@ -116,7 +116,7 @@ sub block_ip {
     # Detect IPv6 (contains colons) vs IPv4 and use appropriate set
     my $set = ($ip =~ /:/) ? 'badipv6' : 'badipv4';
 
-    my $cmd = "nft add element $self->{table} $self->{family_table} $set { $ip timeout ${ttl}s }";
+    my $cmd = "sudo nft add element $self->{table} $self->{family_table} $set { $ip timeout ${ttl}s }";
 
     if ($self->{dry_run}) {
         my $exp = time() + $ttl;
@@ -226,7 +226,7 @@ Returns:
 sub ruleset_as_json {
     my ($self) = @_;
 
-    my $out = `nft -j list ruleset`;
+    my $out = `sudo nft -j list ruleset`;
     unless ($out) {
         $log->error("Failed to get nftables ruleset");
         return {};
@@ -294,9 +294,9 @@ sub _refresh_set {
 
     # Flush the set
     if ($self->{dry_run}) {
-        $log->info("[DRY RUN] Would flush: nft flush set $table $family_table $set_name");
+        $log->info("[DRY RUN] Would flush: sudo nft flush set $table $family_table $set_name");
     } else {
-        system("nft flush set $table $family_table $set_name 2>/dev/null");
+        system("sudo nft flush set $table $family_table $set_name 2>/dev/null");
     }
 
     # Add each CIDR
@@ -305,7 +305,7 @@ sub _refresh_set {
         $cidr =~ s/^\s+|\s+$//g;
         next unless $cidr;
 
-        my $cmd = "nft add element $table $family_table $set_name { $cidr }";
+        my $cmd = "sudo nft add element $table $family_table $set_name { $cidr }";
 
         if ($self->{dry_run}) {
             $log->info("[DRY RUN] Would execute: $cmd");

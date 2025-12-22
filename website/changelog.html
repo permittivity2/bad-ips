@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Changelog - Bad IPs</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: #f5f5f5;
+        }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 40px 20px;
+            text-align: center;
+            margin-bottom: 40px;
+            border-radius: 0 0 20px 20px;
+        }
+        header h1 { font-size: 2.5em; margin-bottom: 10px; }
+        .breadcrumb { margin-bottom: 20px; }
+        .breadcrumb a { color: #667eea; text-decoration: none; }
+        .version-card {
+            background: white;
+            padding: 30px;
+            margin-bottom: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .version-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 3px solid #667eea;
+        }
+        .version-number {
+            font-size: 2em;
+            font-weight: bold;
+            color: #667eea;
+        }
+        .version-date {
+            font-size: 1.1em;
+            color: #666;
+        }
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.85em;
+            font-weight: 600;
+            margin-left: 10px;
+        }
+        .badge-latest { background: #4caf50; color: white; }
+        .category {
+            margin: 25px 0;
+        }
+        .category-title {
+            font-size: 1.3em;
+            font-weight: 600;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+        }
+        .category-title .icon {
+            margin-right: 8px;
+            font-size: 1.2em;
+        }
+        .added { color: #4caf50; }
+        .changed { color: #2196f3; }
+        .fixed { color: #ff9800; }
+        .deprecated { color: #f44336; }
+        .security { color: #9c27b0; }
+        .category ul {
+            margin-left: 30px;
+            list-style: disc;
+        }
+        .category li {
+            margin: 8px 0;
+            line-height: 1.6;
+        }
+        code {
+            background: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+        a { color: #667eea; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        footer { text-align: center; padding: 40px 20px; color: #666; }
+        .intro {
+            background: white;
+            padding: 25px;
+            margin-bottom: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>📋 Changelog</h1>
+        <p>Release history and version notes for Bad IPs</p>
+    </header>
+
+    <div class="container">
+        <div class="breadcrumb">
+            <a href="index.html">← Back to Main</a>
+        </div>
+
+        <div class="intro">
+            <p>This page tracks all notable changes to Bad IPs. Changes are organized by version with the most recent releases first.</p>
+            <p style="margin-top: 10px;"><strong>Legend:</strong>
+                <span class="added">✨ Added</span> |
+                <span class="changed">🔄 Changed</span> |
+                <span class="fixed">🐛 Fixed</span> |
+                <span class="deprecated">⚠️ Deprecated</span> |
+                <span class="security">🔒 Security</span>
+            </p>
+        </div>
+
+        <!-- Version 3.5.0 -->
+        <div class="version-card">
+            <div class="version-header">
+                <div>
+                    <span class="version-number">v3.5.0</span>
+                    <span class="badge badge-latest">LATEST</span>
+                </div>
+                <div class="version-date">December 21, 2025</div>
+            </div>
+
+            <div class="category">
+                <div class="category-title added">
+                    <span class="icon">✨</span> Added
+                </div>
+                <ul>
+                    <li><strong>Privilege Separation:</strong> Service now runs as non-root user (<code>badips</code>) with limited sudo privileges for enhanced security</li>
+                    <li><strong>PublicBlocklistPlugins Architecture:</strong> New extensible plugin system for integrating external IP blocklists</li>
+                    <li><strong>Spamhaus Plugin:</strong> Built-in plugin for Spamhaus DROP and EDROP lists</li>
+                    <li><strong>Expanded IPv6 Defaults:</strong> Added <code>ff00::/8</code> (multicast), <code>::/128</code> (unspecified), and <code>2001:db8::/32</code> (documentation) to default never-block list</li>
+                    <li><strong>Multi-version Apt Repository:</strong> Repository now indexes all package versions for easy upgrades/downgrades</li>
+                    <li><strong>Separate IPv4/IPv6 Prompts:</strong> Install script now clearly separates IPv4 and IPv6 configuration with helpful descriptions</li>
+                    <li><strong>Configuration Documentation:</strong> Added comprehensive PublicBlocklistPlugins developer guide to website</li>
+                </ul>
+            </div>
+
+            <div class="category">
+                <div class="category-title changed">
+                    <span class="icon">🔄</span> Changed
+                </div>
+                <ul>
+                    <li><strong>Simplified Configuration:</strong> Removed hunter/gatherer mode distinction - now uses single unified <code>auto_mode</code> configuration</li>
+                    <li><strong>Single Configuration Template:</strong> Replaced separate hunter/gatherer templates with single <code>badips.conf.template</code></li>
+                    <li><strong>Default Database User:</strong> Changed from <code>bad_ips_hunter</code> to <code>bad_ips</code> for consistency</li>
+                    <li><strong>Install Script UX:</strong> Improved prompts to clearly separate IPv4 and IPv6 network configuration</li>
+                    <li><strong>Documentation Rewrite:</strong> Complete overhaul of <code>CONFIGURATION.md</code> to reflect simplified architecture</li>
+                </ul>
+            </div>
+
+            <div class="category">
+                <div class="category-title fixed">
+                    <span class="icon">🐛</span> Fixed
+                </div>
+                <ul>
+                    <li><strong>Database Config Permissions:</strong> <code>database.conf</code> now created with <code>640</code> permissions instead of <code>600</code> to allow badips user read access</li>
+                    <li><strong>Config File Ownership:</strong> All config files in <code>/usr/local/etc/badips.d/</code> now properly set to <code>root:badips</code> ownership</li>
+                    <li><strong>Install Script Input Sanitization:</strong> Fixed newline handling in CIDR inputs that could corrupt INI file format</li>
+                    <li><strong>Config Parsing:</strong> Fixed awk patterns to prevent matching IPv6 parameters when reading IPv4 settings</li>
+                    <li><strong>Directory Permissions:</strong> Install script now properly sets permissions on <code>badips.d</code> directory during creation</li>
+                </ul>
+            </div>
+
+            <div class="category">
+                <div class="category-title deprecated">
+                    <span class="icon">⚠️</span> Deprecated
+                </div>
+                <ul>
+                    <li><code>public_blocklist_urls</code> - Replaced by <code>[PublicBlocklistPlugins:Name]</code> configuration sections</li>
+                    <li><code>public_blocklist_refresh</code> - Replaced by per-plugin <code>fetch_interval</code> parameter</li>
+                    <li>Hunter/Gatherer mode configuration - Unified into single <code>auto_mode</code> setting</li>
+                </ul>
+            </div>
+
+            <div class="category">
+                <div class="category-title security">
+                    <span class="icon">🔒</span> Security
+                </div>
+                <ul>
+                    <li><strong>Non-root Execution:</strong> Service runs as dedicated <code>badips</code> user instead of root</li>
+                    <li><strong>Limited Sudo Access:</strong> Sudoers rules restrict nftables operations to <code>inet badips</code> table only</li>
+                    <li><strong>Config File Security:</strong> Proper group permissions allow service user to read configs without requiring root</li>
+                    <li><strong>Password Protection:</strong> Database credentials in <code>database.conf</code> secured with <code>640</code> permissions</li>
+                    <li><strong>Supplementary Groups:</strong> Service user added to <code>systemd-journal</code> and <code>adm</code> groups for log access without elevated privileges</li>
+                </ul>
+            </div>
+        </div>
+
+        <!-- Future versions will be added above this comment -->
+
+    </div>
+
+    <footer>
+        <p><a href="index.html">← Back to Main</a> | <a href="configuration.html">Configuration Reference</a></p>
+        <p>Bad IPs v3.5.0 - Silver Linings, LLC</p>
+    </footer>
+</body>
+</html>

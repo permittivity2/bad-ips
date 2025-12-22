@@ -154,6 +154,25 @@ update_versions() {
     echo "Version updates complete!"
     echo ""
 
+    # Check if version exists in changelog
+    if ! grep -q "v$VERSION" "$SCRIPT_DIR/website/changelog.html"; then
+        echo ""
+        echo "============================================"
+        echo "⚠️  WARNING: v$VERSION not found in changelog!"
+        echo "============================================"
+        echo ""
+        echo "Please update website/changelog.html before releasing"
+        echo "URL: https://projects.thedude.vip/bad-ips/changelog.html"
+        echo ""
+        read -p "Continue anyway? [y/N] " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            echo "Build cancelled. Please update the changelog."
+            exit 1
+        fi
+        echo ""
+    fi
+
     # Show what changed
     echo "Git status:"
     git -C "$SCRIPT_DIR" status --short | grep -E "(DEBIAN/control|man8/bad_ips.8|README.md|website/|BadIPs)" || echo "  No changes detected"
@@ -235,6 +254,9 @@ deploy_package() {
 
     echo ""
     echo "Updating apt repository..."
+    # Copy the latest update-repo.sh from the git repo
+    cp "$SCRIPT_DIR/docs/update-repo.sh" ~/apt-repo/update-repo.sh
+    chmod +x ~/apt-repo/update-repo.sh
     cd ~/apt-repo && ./update-repo.sh
 
     echo ""

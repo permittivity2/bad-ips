@@ -1,0 +1,79 @@
+# Bad IPs Configuration Template
+# Copy this file to /usr/local/etc/badips.conf and customize it
+
+[global]
+# CRITICAL: never_block_cidrs MUST be defined!
+# Add your trusted networks, management IPs, and private networks here
+# WARNING: Failure to set this correctly could lock you out!
+never_block_cidrs = 127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16,224.0.0.0/4,240.0.0.0/4,0.0.0.0/8
+
+# Blocking duration
+block_duration = 691200          # 8 days in seconds (8 * 24 * 60 * 60)
+
+# Automatic detection of services and log sources
+auto_mode = 1
+
+# Performance settings
+sleep_time = 2                   # Seconds between log checks
+initial_journal_lookback = 86400 # How far back to check journal on startup (24 hours)
+cleanup_every_seconds = 3600     # Cleanup interval
+
+# Database settings
+db_dir = /var/lib/bad_ips
+db_file = /var/lib/bad_ips/bad_ips.sql
+
+# Nftables settings
+nft_table = inet
+nft_family_table = filter
+nft_set = badipv4
+
+# Logging
+log_level = INFO
+
+# Network filtering (IPv6)
+never_block_cidrs_v6 = ::1/128,fe80::/10,fc00::/7,ff00::/8,::/128,2001:db8::/32
+always_block_cidrs_v6 =
+
+# Public Blocklist Plugin Configurations
+# (optional) urls - Comma separated list of URLs to fetch the blocklist from
+# (optional) fetch_interval - How often (in seconds) to fetch the blocklist
+# (optional) use_cache - 1 to use caching, 0 to not use caching
+# (optional) cache_path - Directory path to store cached files (if use_cache is 1)
+# (required*) active - 1 to enable this blocklist plugin, 0 to disable it
+# Each plugin MUST have
+# * a unique name after PublicBlocklistPlugins:
+# * at least active = 1 to be used; all other parameters are really at the use of the plugin
+[PublicBlocklistPlugins:Spamhaus]
+urls = https://www.spamhaus.org/drop/drop.txt, https://www.spamhaus.org/drop/edrop.txt
+fetch_interval = 3600
+use_cache = 1
+cache_path = /var/cache/badips/
+active = 1
+
+[PublicBlocklistPlugins:Feodotracker]
+urls = https://feodotracker.abuse.ch/downloads/ipblocklist.txt
+fetch_interval = 7200
+use_cache = 1
+cache_path = /var/cache/badips/
+active = 0
+
+[PublicBlocklistPlugins:Blocklist_de]
+urls = https://lists.blocklist.de/lists/all.txt
+fetch_interval = 10800
+use_cache = 1
+cache_path = /var/cache/badips/
+active = 0
+
+[PublicBlocklistPlugins:DNSBL_Info]
+urls = https://www.dnsbl.info/dnsbl-list.php?file=dnslist-ipv4.txt
+fetch_interval = 14400
+use_cache = 1
+cache_path = /var/cache/badips/
+active = 0
+
+[PublicBlocklistPlugins:Malwaredomainlist]
+urls = http://www.malwaredomainlist.com/hostslist/ip.txt
+fetch_interval = 21600
+use_cache = 1
+cache_path = /var/cache/badips/
+active = 0

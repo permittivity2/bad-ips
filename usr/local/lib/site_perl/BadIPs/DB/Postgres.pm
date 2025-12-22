@@ -6,7 +6,7 @@ use DBI;
 use Log::Log4perl qw(get_logger);
 use Sys::Hostname;
 
-our $VERSION = '3.4.7';
+our $VERSION = '3.5.0';
 
 my $log = get_logger("BadIPs::DB::Postgres");
 
@@ -190,11 +190,49 @@ sub upsert_blocked_ip_batch {
 
     my @placeholders;
     my @values;
+    my $skipped = 0;
 
     for my $row (@$rows) {
+        my $ip = $row->{ip};
+
+        # CRITICAL: Validate IP address - reject invalid/reserved addresses
+        unless ($ip) {
+            $log->warn("Skipping row with undefined IP address");
+            $skipped++;
+            next;
+        }
+
+        # Reject unspecified addresses (:: for IPv6, 0.0.0.0 for IPv4)
+        if ($ip eq '::' || $ip eq '0.0.0.0') {
+            $log->warn("Skipping unspecified address: $ip (detector: " . ($row->{detector_name} || 'unknown') . ")");
+            $skipped++;
+            next;
+        }
+
+        # Reject loopback addresses
+        if ($ip eq '::1' || $ip =~ /^127\./) {
+            $log->debug("Skipping loopback address: $ip");
+            $skipped++;
+            next;
+        }
+
+        # Reject link-local addresses
+        if ($ip =~ /^fe80:/i || $ip =~ /^169\.254\./) {
+            $log->debug("Skipping link-local address: $ip");
+            $skipped++;
+            next;
+        }
+
+        # Reject multicast addresses
+        if ($ip =~ /^ff[0-9a-f]{2}:/i || $ip =~ /^2[2-3][4-9]\./) {
+            $log->debug("Skipping multicast address: $ip");
+            $skipped++;
+            next;
+        }
+
         push @placeholders, "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         push @values,
-            $row->{ip},
+            $ip,
             $row->{originating_server} || $hostname,
             $row->{originating_service} || 'unknown',
             $row->{detector_name}       || 'unknown',
@@ -205,6 +243,13 @@ sub upsert_blocked_ip_batch {
             $row->{expires_at},
             $row->{block_count} || 1;
     }
+
+    # If all rows were skipped, return early
+    if ($skipped > 0) {
+        $log->info("Skipped $skipped invalid/reserved IP address(es) from database insertion");
+    }
+
+    return 0 unless @placeholders;
 
     $sql .= join(", ", @placeholders);
     $sql .= " ON CONFLICT(ip, originating_server) DO UPDATE SET

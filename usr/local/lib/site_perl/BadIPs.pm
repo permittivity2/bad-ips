@@ -11,7 +11,7 @@ use POSIX qw(strftime);
 use JSON qw(decode_json);
 use Log::Log4perl qw( get_logger );
 use Log::Log4perl::MDC;
-use Regexp::Common qw(net);
+use Regexp::Common qw(net);  # Exports %RE{net}
 use Net::CIDR qw(cidrlookup);
 use Sys::Hostname qw(hostname);
 use File::ReadBackwards;
@@ -32,7 +32,7 @@ $Data::Dumper::Indent   = 1;
 
 my $log = get_logger("BadIPs") || die "You MUST initialize Log::Log4perl before using BadIPs module";
 
-our $VERSION = '3.4.7';
+our $VERSION = '3.5.0';
 
 # -------------------------------------------------------------------------
 # Shared state for all threads
@@ -509,6 +509,16 @@ sub _load_config {
             %accum = (%accum, %$h);
         }
 
+        # Process [PublicBlocklistPlugins:*] sections
+        for my $section (keys %$c) {
+            if ($section =~ /^PublicBlocklistPlugins:(.+)/) {
+                my $plugin_name = $1;
+                my $p = $c->{$section};
+                $accum{PublicBlocklistPlugins}->{$plugin_name} = $p;
+                $log->debug("Loaded PublicBlocklistPlugin config: $plugin_name") if $log;
+            }
+        }
+
         # Process [detector:*] sections
         for my $section (keys %$c) {
             if ($section =~ /^detector:(.+)/) {
@@ -535,6 +545,9 @@ sub _load_config {
                 $log->debug("Loaded detector: $detector_name") if $log;
             }
         }
+
+        
+            
     }
 
     # Merge detector configurations with global config
@@ -584,7 +597,8 @@ sub _load_config {
     $accum{auto_mode}                 //= 1;
 
     # Public blocklist defaults
-    $accum{public_blocklist_urls}     //= '';
+    $accum{public_blocklist_urls}     //= [];
+    $accum{public_blocklist_plugins} //= [];
     $accum{public_blocklist_refresh}  //= 900;
     $accum{public_blocklist_use_cache}//= 1;
     $accum{public_blocklist_cache_path}//= '/var/cache/badips';
@@ -608,7 +622,7 @@ sub _load_config {
     $accum{db_host}     //= 'localhost';
     $accum{db_port}     //= 5432;
     $accum{db_name}     //= 'bad_ips';
-    $accum{db_user}     //= 'bad_ips_hunter';
+    $accum{db_user}     //= 'bad_ips';
     $accum{db_password} //= '';
     $accum{db_ssl_mode} //= 'disable';
 
@@ -829,10 +843,9 @@ sub _start_worker_threads {
     my ($self) = @_;
 
     my %workers = ( 
-        nft_blocker       => \&_worker_nft_blocker,
-        central_db_sync   => \&_worker_central_db_sync,
-        pull_global_blocks=> \&_worker_pull_global_blocks,
-        public_blocklists => \&_worker_public_blocklists,
+        nft_blocker            => \&_worker_nft_blocker,
+        central_db_sync        => \&_worker_central_db_sync,
+        pull_global_blocks     => \&_worker_pull_global_blocks,
     );
 
     $self->{threads} = [];
@@ -850,6 +863,10 @@ sub _start_worker_threads {
         }
         push @{$self->{threads}}, { name => $name, thread => $thr };
     }
+
+    # This sub creates more threads (potentially)
+    $log->info("Activating PublicBlocklistPlugins");
+    $self->_start_publicblocklist_plugins();
 
     $log->info("All worker threads started");
 }
@@ -885,6 +902,7 @@ sub _shutdown_and_join_workers {
     $log->info("Joining worker threads: " . join(", ", @thread_info));
 
     my $graceful_timeout = $self->{conf}->{graceful_shutdown_timeout} || 300;
+    $log->info("Allowing up to ${graceful_timeout}s for all threads to exit gracefully");
     for my $wt (@{$self->{threads} || []}) {
         my $name = $wt->{name};
         my $thr  = $wt->{thread};
@@ -974,10 +992,13 @@ sub _handle_reload_request {
 
     # 4) Re-init queues and restart workers
     $self->_init_queues();
-    $self->_start_worker_threads();
 
-    # 5) Clear reload flag
+    # 5) Clear reload flag before starting workers to avoid race
     _clear_reload_flag();
+
+    # 6) Restart workers
+    $self->_start_worker_threads();
+    $self->_start_publicblocklist_plugins();
 }
 
 =head2 _join_with_timeout
@@ -1498,202 +1519,88 @@ sub _worker_pull_global_blocks {
     return 1;
 }
 
-=head2 _worker_public_blocklists
+=head2 _start_publicblocklist_plugins
 
 Description:
-    Worker thread that periodically fetches public blocklists (e.g.
-    Spamhaus) from configured URLs, using conditional GETs based on
-    ETag/If-Modified-Since and a local cache. Extracted IPs and
-    IPv4/CIDRs are enqueued to ips_to_block_queue.
-
-Arguments:
-    %args:
-        conf => hashref, cloned configuration for this thread
+    Helper sub that starts threads for each active PublicBlocklistPlugin
+    configured in conf.d. Each plugin runs in its own thread and is
+    responsible for fetching and processing its own blocklist source(s).
 
 Returns:
-    Nothing.
-
+    1 when exiting.
 =cut
+sub _start_publicblocklist_plugins {
+    my ($self) = @_;
+    my $conf = dclone($self->{conf}) || {};
 
-sub _worker_public_blocklists {
-    my (%args) = @_;
-    my $conf = $args{conf} || {};
-    my $thread_name = $args{thread_name} ||  (caller(0))[3];
+    $log->info("_start_publicblocklist_plugins started");
 
-    Log::Log4perl::MDC->put("THREAD" => $thread_name);    
+    my @plugins = keys %{ $conf->{PublicBlocklistPlugins} || {} };
+    if (!@plugins) {
+        $log->info("no public blocklist plugins configured; exiting");
+        return 1;
+    }
 
-    my $urls       = $conf->{public_blocklist_urls} || [];
-    my $interval   = $conf->{public_blocklist_refresh} || 3600;
-    my $use_cache  = defined $conf->{public_blocklist_use_cache}
-                   ? $conf->{public_blocklist_use_cache}
-                   : 1;
-    my $cache_path = $conf->{public_blocklist_cache_path} || '/var/cache/badips';
+    foreach my $plugin (@plugins) {
+        my $plugin_conf = $conf->{PublicBlocklistPlugins}{$plugin} || {};
+        unless ($plugin_conf->{active}) {
+            $log->info("public blocklist plugin: $plugin is not active; skipping");
+            next;
+        }
 
-    $log->info("public_blocklist_thread started");
+        my $class = "BadIPs::PublicBlocklistPlugins::$plugin";
+        (my $file = $class) =~ s!::!/!g;
+        $file .= '.pm';
 
-    if ($use_cache && ! -d $cache_path) {
-        eval { make_path($cache_path) };
+        # Load the plugin module
+        eval { require $file; 1 } or do {
+            $log->error("failed to load public blocklist plugin: $plugin with error(s): $@");
+            next;
+        };
+        $log->info("loaded public blocklist plugin: $plugin");
+
+        # Args passed into plugin->new(...)
+        my %class_args = (
+            conf           => $conf,
+            reload_check   => \&_get_reload_flag,
+            shutdown_check => \&_get_shutdown_flag,
+            enqueue_ip     => sub {
+                my ($ip_item) = @_;
+                $ips_to_block_queue->enqueue($ip_item);
+            },
+            log => get_logger($class),  # optional, but nice
+        );
+
+        my $obj = eval { $class->new(%class_args) };
+        if (!$obj) {
+            $log->error("failed to instantiate public blocklist plugin: $plugin: $@");
+            next;
+        }
+
+        unless ($obj->can('run')) {
+            $log->error("public blocklist plugin: $plugin does not have required sub run()");
+            next;
+        }
+
+        # Give each plugin its own thread
+        my $thr;
+        eval {
+            $thr = threads->create(
+                sub { $obj->run() }  # can pass args if you want
+            );
+        };
+
         if ($@) {
-            $log->warn("public_blocklist_thread: failed to create cache dir $cache_path: $@");
-            $use_cache = 0;
+            $log->error("failed to start thread for public blocklist plugin: $plugin: $@");
+            next;
+        }
+        if ($thr) {
+            $log->info("started public blocklist plugin thread: $plugin (TID: " . $thr->tid . ")");
+            push @{$self->{threads}}, { name => $class, thread => $thr };
+        } else {
+            $log->error("failed to start thread for public blocklist plugin: $plugin");
         }
     }
-
-    unless (@$urls) {
-        $log->info("public_blocklist_thread: no public blocklist URLs configured; exiting");
-        return;
-    }
-
-    my $ua = LWP::UserAgent->new(
-        timeout  => 10,
-        agent    => "BadIPs/3.0",
-        ssl_opts => { verify_hostname => 1 },
-        max_size => 5_000_000,
-    );
-
-    while (!_get_shutdown_flag() && !_get_reload_flag()) {
-
-        URL:
-        for my $url (@$urls) {
-            next URL unless $url;
-            $log->info("public_blocklist_thread: processing source $url");
-
-            my $url_md5    = md5_hex($url);
-            my $cache_file = "$cache_path/blocklist_$url_md5.txt";
-            my $etag_file  = "$cache_path/blocklist_$url_md5.etag";
-            my $lm_file    = "$cache_path/blocklist_$url_md5.lastmod";
-
-            my ($etag, $lastmod);
-
-            if ($use_cache && -f $etag_file) {
-                if (open my $fh, '<', $etag_file) {
-                    local $/;
-                    $etag = <$fh>;
-                    close $fh;
-                    chomp($etag) if $etag;
-                }
-            }
-            if ($use_cache && -f $lm_file) {
-                if (open my $fh, '<', $lm_file) {
-                    local $/;
-                    $lastmod = <$fh>;
-                    close $fh;
-                    chomp($lastmod) if $lastmod;
-                }
-            }
-
-            my $content;
-            my $cache_is_fresh = 0;
-
-            # Cache freshness check
-            if ($use_cache && -f $cache_file) {
-                my $mtime = (stat($cache_file))[9] || 0;
-                my $age   = time() - $mtime;
-                if ($age < $interval) {
-                    $cache_is_fresh = 1;
-                    $log->info("public_blocklist_thread: using fresh cached blocklist $cache_file (age=${age}s)");
-                    $content = do {
-                        local $/;
-                        open my $fh, '<', $cache_file or do {
-                            $log->warn("public_blocklist_thread: could not read cache file $cache_file: $!");
-                            undef;
-                        };
-                        <$fh>;
-                    };
-                } else {
-                    $log->info("public_blocklist_thread: cache stale for $url (age=${age}s), performing conditional HTTP GET");
-                }
-            }
-
-            # Conditional GET if needed
-            if (!$content) {
-                my %headers;
-                $headers{'If-None-Match'}     = $etag    if defined $etag    && length $etag;
-                $headers{'If-Modified-Since'} = $lastmod if defined $lastmod && length $lastmod;
-
-                $log->info("public_blocklist_thread: sending GET $url with headers: " . Dumper(\%headers));
-                my $response = $ua->get($url, %headers);
-
-                if ($response->code == 304) {
-                    $log->info("public_blocklist_thread: 304 Not Modified for $url, using cached content");
-                    $content = do {
-                        local $/;
-                        open my $fh, '<', $cache_file or do {
-                            $log->warn("public_blocklist_thread: cache missing for $url despite 304; skipping");
-                            next URL;
-                        };
-                        <$fh>;
-                    };
-                }
-                elsif ($response->is_success) {
-                    $content = $response->decoded_content;
-                    if ($use_cache) {
-                        if (open my $fh, '>', $cache_file) {
-                            print {$fh} $content;
-                            close $fh;
-                        }
-                        if (my $new_etag = $response->header('ETag')) {
-                            if (open my $efh, '>', $etag_file) {
-                                print {$efh} $new_etag;
-                                close $efh;
-                                $log->info("public_blocklist_thread: saved ETag for $url: $new_etag");
-                            }
-                        }
-                        if (my $new_lm = $response->header('Last-Modified')) {
-                            if (open my $lfh, '>', $lm_file) {
-                                print {$lfh} $new_lm;
-                                close $lfh;
-                                $log->info("public_blocklist_thread: saved Last-Modified for $url: $new_lm");
-                            }
-                        }
-                        $log->info("public_blocklist_thread: updated cache for $url");
-                    }
-                }
-                else {
-                    $log->warn("public_blocklist_thread: failed to fetch $url: " . $response->status_line);
-                    if ($use_cache && -f $cache_file) {
-                        $log->warn("public_blocklist_thread: using stale cache for $url due to error");
-                        $content = do {
-                            local $/;
-                            open my $fh, '<', $cache_file;
-                            <$fh>;
-                        };
-                    } else {
-                        next URL;
-                    }
-                }
-            }
-
-            my %seen;
-            while ($content =~ /($RE{net}{IPv4})(?:\/(\d{1,2}))?/g) {
-                my $ip   = $1;
-                my $mask = $2;
-                my $entry = defined $mask ? "$ip/$mask" : $ip;
-                $seen{$entry}++;
-            }
-
-            $log->info("public_blocklist_thread: blocklist ($url) contains " . scalar(keys %seen) . " entries");
-
-            for my $entry (keys %seen) {
-                next if _is_never_block_ip(ip => $entry, conf => $conf);
-
-                $ips_to_block_queue->enqueue({
-                    ip       => $entry,
-                    source   => 'public_blocklist',
-                    detector => $url,
-                    line     => undef,
-                });
-            }
-        }
-
-        for (1 .. $interval) {
-            last if _get_shutdown_flag() || _get_reload_flag();
-            sleep 1;
-        }
-    }
-
-    $log->info("public_blocklist_thread ready to be joined");
-    Log::Log4perl::MDC->remove("THREAD");
 
     return 1;
 }
@@ -2416,5 +2323,4 @@ sub _remote_addresses {
 }
 
 1;
-
 

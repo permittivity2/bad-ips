@@ -6,6 +6,15 @@ Bad IPs uses INI-style configuration files. The main config is `/usr/local/etc/b
 
 ## Main Configuration: badips.conf
 
+### Quick Start
+
+Copy the template and edit it:
+
+```bash
+sudo cp /usr/local/etc/badips.conf.template /usr/local/etc/badips.conf
+sudo nano /usr/local/etc/badips.conf
+```
+
 ### Required Settings
 
 #### never_block_cidrs (REQUIRED)
@@ -28,19 +37,23 @@ never_block_cidrs = 10.0.0.0/8,192.168.1.0/24,127.0.0.0/8,0.0.0.0/8,224.0.0.0/4,
 - `0.0.0.0/8` - This network
 - **YOUR PUBLIC IPS** - Add your static IPs/ranges here!
 
-### Hunter Mode (Default)
-
-For servers that monitor local logs and block locally:
+### Core Settings
 
 ```ini
 [global]
-mode = hunter
-blocking_time = 691200          # 8 days in seconds
-sleep_time = 1                  # Seconds between log checks
-heartbeat = 60                  # Heartbeat log interval
-extra_time = 120                # Extra blocking time buffer
-initial_journal_lookback = 86460  # 24 hours in seconds
-never_block_cidrs = <YOUR_CIDRS_HERE>
+# Network filtering (REQUIRED)
+never_block_cidrs = 10.0.0.0/8,192.168.1.0/24,127.0.0.0/8
+
+# Blocking duration
+block_duration = 691200          # 8 days in seconds
+
+# Automatic detection of services
+auto_mode = 1                    # Automatically detect journal units and log files
+
+# Performance settings
+sleep_time = 2                   # Seconds between log checks
+initial_journal_lookback = 86400 # How far back to check journal on startup (24 hours)
+cleanup_every_seconds = 3600     # Cleanup interval
 
 # Database settings
 db_dir = /var/lib/bad_ips
@@ -55,32 +68,51 @@ nft_set = badipv4
 log_level = INFO
 ```
 
-### Gatherer Mode
+### Optional Settings
 
-For the central server that aggregates and propagates blocks:
+#### always_block_cidrs
+Block these networks permanently (in addition to detected IPs):
 
 ```ini
 [global]
-mode = gatherer
-blocking_time = 691200
-never_block_cidrs = <YOUR_CIDRS_HERE>
+always_block_cidrs = 224.0.0.0/4,240.0.0.0/4
+```
 
-# Gatherer-specific settings
-propagation_delay = 5           # Seconds between propagation cycles
-remote_server_timeout = 10      # SSH timeout in seconds
-remote_server_timeout_action = log_only  # log_only, skip, or fail
-remote_servers = proxy,mail,dovecot,ns01,ns02,ns03,nas
+#### IPv6 Settings
 
-# Parallel operations
-parallel_operations = 1         # Enable parallel SSH (1=yes, 0=no)
-max_parallel_workers = 6        # Max concurrent SSH connections
+```ini
+[global]
+never_block_cidrs_v6 = ::1/128,fe80::/10,fc00::/7,ff00::/8,::/128,2001:db8::/32
+always_block_cidrs_v6 =
+```
 
-# Database and nftables (same as hunter)
-db_dir = /var/lib/bad_ips
-db_file = /var/lib/bad_ips/bad_ips.sql
-nft_table = inet
-nft_family_table = filter
-nft_set = badipv4
+**Common IPv6 ranges to include:**
+- `::1/128` - IPv6 localhost
+- `fe80::/10` - Link-local addresses
+- `fc00::/7` - Unique local addresses (private networks)
+- `ff00::/8` - Multicast
+- `::/128` - Unspecified address
+- `2001:db8::/32` - Documentation/example addresses
+- **YOUR PUBLIC IPv6s** - Add your static IPv6 addresses/ranges here!
+
+#### Public Blocklist Plugins
+
+Add external blocklists to supplement local detection:
+
+```ini
+[PublicBlocklistPlugins:Spamhaus]
+urls = https://www.spamhaus.org/drop/drop.txt, https://www.spamhaus.org/drop/edrop.txt
+fetch_interval = 3600
+use_cache = 1
+cache_path = /var/cache/badips/
+active = 1
+
+[PublicBlocklistPlugins:Feodotracker]
+urls = https://feodotracker.abuse.ch/downloads/ipblocklist.txt
+fetch_interval = 7200
+use_cache = 1
+cache_path = /var/cache/badips/
+active = 0
 ```
 
 ### Host-Specific Overrides
@@ -88,214 +120,181 @@ nft_set = badipv4
 Override settings for specific hostnames:
 
 ```ini
-[host:administrator]
-mode = gatherer
-remote_servers = proxy,mail,dovecot,ns01,ns02,ns03,nas
+[host:webserver01]
+log_level = DEBUG
 
-[host:proxy]
-mode = hunter
+[host:mailserver]
+block_duration = 1209600  # 14 days
 ```
 
 ## Detector Configuration: badips.d/*.conf
 
-Detectors define which services to monitor and what patterns indicate attacks.
+Detectors define which services to monitor and what patterns indicate bad behavior.
 
-### Detector File Format
-
-```ini
-[detector:NAME]
-units = systemd-unit1.service, systemd-unit2.service
-pattern1 = First regex pattern to match
-pattern2 = Second regex pattern to match
-pattern3 = Third regex pattern to match
-max_threshold = 5               # Max occurrences before blocking
-time_window = 60                # Time window for threshold (seconds)
-```
-
-### Included Detectors
-
-#### 10-sshd.conf
+### File Format
 
 ```ini
-[detector:ssh]
-units = ssh.service, sshd.service
-pattern1 = Failed password for
-pattern2 = Connection closed by authenticating user
-pattern3 = Disconnected from authenticating user .* \[preauth\]
-pattern4 = Connection reset by authenticating user
+[global]
+journal_units = <systemd-units>  # Comma-separated
+file_sources = <log-files>       # Comma-separated
+bad_conn_patterns = <regex>      # Perl regex, one per line
 ```
 
-#### 20-postfix.conf
+### Example: SSH Detector (10-sshd.conf)
 
 ```ini
-[detector:postfix]
-units = postfix.service, postfix@-.service
-pattern1 = SASL LOGIN authentication failed
-pattern2 = lost connection after AUTH
-pattern3 = too many errors after AUTH
-pattern4 = disconnect from .* auth=0
+[global]
+journal_units = ssh.service,sshd.service
+bad_conn_patterns =
+    Failed password for .* from (\S+)
+    Connection closed by authenticating user .* (\S+) port \d+ \[preauth\]
+    Invalid user .* from (\S+)
+    Unable to negotiate .* from (\S+)
 ```
 
-#### 30-dovecot.conf
+### Example: Postfix Detector (20-postfix.conf)
 
 ```ini
-[detector:dovecot]
-units = dovecot.service
-pattern1 = auth failed
-pattern2 = Disconnected \(auth failed
-pattern3 = Aborted login
+[global]
+journal_units = postfix.service,postfix@-.service
+bad_conn_patterns =
+    SASL LOGIN authentication failed.*\[(\S+)\]
+    lost connection after AUTH from.*\[(\S+)\]
+    too many errors after AUTH from.*\[(\S+)\]
 ```
 
-#### 40-nginx.conf
+### Example: Nginx Detector (40-nginx.conf)
 
 ```ini
-[detector:nginx]
-units = nginx.service
-pattern1 = 404.*GET.*wp-admin
-pattern2 = 404.*GET.*wp-login
-pattern3 = 404.*GET.*/\.env
-pattern4 = 400 Bad Request
+[global]
+file_sources = /var/log/nginx/access.log,/var/log/nginx/error.log
+bad_conn_patterns =
+    "(?:GET|POST) .* HTTP/\d\.\d" 40[0134] \d+ ".+" ".+" (\S+)
+    limiting requests, excess:.* client: (\S+)
+    limiting connections by zone.*client: (\S+)
 ```
 
-#### 70-bind.conf
+### Available Detectors
+
+Pre-configured detectors are installed in `/usr/local/etc/badips.d/`:
+- `10-sshd.conf` - SSH brute force detection
+- `20-postfix.conf` - Mail authentication failures
+- `30-dovecot.conf` - IMAP/POP3 authentication
+- `40-nginx.conf` - Web server abuse
+- `50-apache.conf` - Apache web server
+- `70-bind.conf` - DNS query abuse
+
+## Database Configuration: badips.d/database.conf
+
+Configure PostgreSQL connection (automatically created during install):
 
 ```ini
-[detector:named]
-units = named.service, bind9.service
-pattern1 = query \(cache\) '.*' denied
-pattern2 = refused.*invalid zone
-pattern3 = rate limit drop
+[global]
+db_host = localhost
+db_port = 5432
+db_name = bad_ips
+db_user = bad_ips
+db_password = <your-password>
+db_ssl_mode = disable
 ```
 
-### Creating Custom Detectors
+## Advanced Configuration
 
-Create a new file in `/usr/local/etc/badips.d/` (e.g., `90-custom.conf`):
+### Blocking Time Settings
 
 ```ini
-[detector:myapp]
-units = myapp.service
-pattern1 = Authentication failure from ([0-9.]+)
-pattern2 = Invalid login attempt
-max_threshold = 3
-time_window = 300
+[global]
+# How long to block detected IPs (seconds)
+block_duration = 691200  # 8 days
+
+# Database batch settings
+central_db_batch_size = 20
+central_db_queue_timeout = 5
 ```
 
-**Tips:**
-- Use regex patterns to match log entries
-- Capture groups `([0-9.]+)` will extract the IP address
-- Lower numbered files (10-) are processed first
-- Test patterns with: `journalctl -u myapp.service | grep "pattern"`
+### Performance Tuning
 
-## SSH Configuration for Gatherer
+```ini
+[global]
+# How often to check logs
+sleep_time = 2
 
-The gatherer uses SSH to communicate with remote servers. SSH keys must be configured:
+# Initial journal lookback on startup
+initial_journal_lookback = 86400  # 24 hours
+
+# Cleanup frequency
+cleanup_every_seconds = 3600
+
+# Max lines to tail from log files
+max_file_tail_lines = 2000
+```
+
+### Nftables Configuration
+
+```ini
+[global]
+# Table and set names
+nft_table = inet
+nft_family_table = filter
+nft_set = badipv4
+
+# IPv6 support
+nft_set_v6 = badipv6
+```
+
+## Complete Example Configuration
+
+```ini
+[global]
+# Required: Never block these networks
+never_block_cidrs = 10.0.0.0/8,192.168.0.0/16,172.16.0.0/12,127.0.0.0/8,169.254.0.0/16,224.0.0.0/4,240.0.0.0/4
+
+# Blocking
+block_duration = 691200
+auto_mode = 1
+
+# Performance
+sleep_time = 2
+initial_journal_lookback = 86400
+cleanup_every_seconds = 3600
+
+# Database
+db_dir = /var/lib/bad_ips
+db_file = /var/lib/bad_ips/bad_ips.sql
+
+# Nftables
+nft_table = inet
+nft_family_table = filter
+nft_set = badipv4
+
+# Logging
+log_level = INFO
+
+# Public blocklists
+[PublicBlocklistPlugins:Spamhaus]
+urls = https://www.spamhaus.org/drop/drop.txt, https://www.spamhaus.org/drop/edrop.txt
+fetch_interval = 3600
+use_cache = 1
+cache_path = /var/cache/badips/
+active = 1
+```
+
+## Testing Configuration
+
+After editing your config:
 
 ```bash
-# On administrator (gatherer)
-sudo -i
-ssh-keygen -t ed25519 -C "root@administrator"
+# Validate config syntax
+sudo bad_ips --dry-run
 
-# Copy to each hunter server
-for server in proxy mail dovecot ns01 ns02 ns03 nas; do
-  ssh-copy-id gardner@$server
-done
-```
+# Restart service
+sudo systemctl restart bad_ips.service
 
-## Security Considerations
+# Check status
+sudo systemctl status bad_ips.service
 
-### never_block_cidrs is REQUIRED
-
-- **NEVER** deploy without defining `never_block_cidrs`
-- Always include your static IP addresses
-- Include your entire management network
-- Test blocking before deploying to production
-
-### Blocking Time
-
-- Default: 691,200 seconds (8 days)
-- Adjust based on your threat model
-- Longer times reduce database churn
-- Shorter times allow faster recovery from false positives
-
-### Propagation Delay
-
-- Default: 5 seconds (gatherer only)
-- Lower = faster propagation, higher CPU/network usage
-- Higher = slower propagation, lower resource usage
-- 5 seconds is a good balance for most networks
-
-## Troubleshooting
-
-### Check Configuration Loading
-
-```bash
-# Start in debug mode
-sudo /usr/local/sbin/bad_ips --debug
-```
-
-### Verify never_block_cidrs
-
-```bash
-# Check loaded config
-sudo grep never_block_cidrs /usr/local/etc/badips.conf
-```
-
-### Test IP Against CIDR
-
-```bash
-# Check if IP would be blocked
-sudo /usr/local/sbin/bad_ips --test-ip 192.168.1.100
-```
-
-### Detector Not Firing
-
-```bash
-# Check systemd journal for patterns
-sudo journalctl -u ssh.service | grep "Failed password"
-
-# Verify detector config
-cat /usr/local/etc/badips.d/10-sshd.conf
-
-# Check bad_ips logs
+# Watch logs
 sudo journalctl -u bad_ips.service -f
-```
-
-## Examples
-
-### Hunter Configuration (mail server)
-
-```ini
-[global]
-mode = hunter
-blocking_time = 691200
-never_block_cidrs = 10.0.0.0/8,192.168.1.0/24,127.0.0.0/8
-db_dir = /var/lib/bad_ips
-db_file = /var/lib/bad_ips/bad_ips.sql
-nft_table = inet
-nft_family_table = filter
-nft_set = badipv4
-log_level = INFO
-```
-
-### Gatherer Configuration (administrator)
-
-```ini
-[global]
-mode = gatherer
-blocking_time = 691200
-never_block_cidrs = 10.0.0.0/8,192.168.1.0/24,127.0.0.0/8
-propagation_delay = 5
-remote_server_timeout = 10
-remote_server_timeout_action = log_only
-remote_servers = proxy,mail,dovecot,ns01,ns02,ns03,nas
-parallel_operations = 1
-max_parallel_workers = 6
-db_dir = /var/lib/bad_ips
-db_file = /var/lib/bad_ips/bad_ips.sql
-nft_table = inet
-nft_family_table = filter
-nft_set = badipv4
-log_level = INFO
 ```
 
 ## See Also
