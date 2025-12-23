@@ -14,6 +14,8 @@ It monitors logs from systemd journald units and/or plain log files, detects sus
 This is **not Fail2ban**.  
 BadIPs is a coordinated, deterministic, network-wide ban system intended for environments with multiple servers and a desire for shared intelligence and predictable behavior.
 
+Website for install and full documentation:  https://projects.thedude.vip/bad-ips/index.html
+
 ---
 
 ## Why BadIPs Exists
