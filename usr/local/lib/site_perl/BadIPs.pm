@@ -5,7 +5,6 @@ use feature 'state';
 
 use Config::Tiny;
 use File::Spec;
-use File::Path qw(make_path);
 use Time::HiRes qw(time sleep);
 use POSIX qw(strftime);
 use JSON qw(decode_json);
@@ -16,9 +15,6 @@ use Net::CIDR qw(cidrlookup);
 use Sys::Hostname qw(hostname);
 use File::ReadBackwards;
 use Data::Dumper;
-use LWP::UserAgent;
-use LWP::Protocol::file;
-use Digest::MD5 qw(md5_hex);
 use Storable qw(dclone);
 use BadIPs::NFT;
 use BadIPs::DB;
@@ -545,9 +541,6 @@ sub _load_config {
                 $log->debug("Loaded detector: $detector_name") if $log;
             }
         }
-
-        
-            
     }
 
     # Merge detector configurations with global config
@@ -998,7 +991,6 @@ sub _handle_reload_request {
 
     # 6) Restart workers
     $self->_start_worker_threads();
-    $self->_start_publicblocklist_plugins();
 }
 
 =head2 _join_with_timeout
@@ -1047,54 +1039,6 @@ sub _join_with_timeout {
 # -------------------------------------------------------------------------
 # DB helpers (PostgreSQL only)
 # -------------------------------------------------------------------------
-
-=head2 _create_db_connection
-
-Description:
-    Create a new database connection using the BadIPs::DB module.
-
-Arguments:
-    %args:
-        conf => hashref with database configuration keys
-
-Returns:
-    $dbh – DBI handle on success, or undef on failure.
-
-=cut
-
-sub _create_db_connection {
-    my (%args) = @_;
-    my $conf = $args{conf} || {};
-
-    return undef unless $conf->{db_host} && defined $conf->{db_password};
-
-    # Create DB module instance
-    my $db = BadIPs::DB->new(
-        db_type     => $conf->{db_type} || 'postgres',
-        db_host     => $conf->{db_host},
-        db_port     => $conf->{db_port},
-        db_name     => $conf->{db_name},
-        db_user     => $conf->{db_user},
-        db_password => $conf->{db_password},
-        db_ssl_mode => $conf->{db_ssl_mode},
-    );
-
-    # Connect to database
-    my $dbh = $db->connect();
-
-    unless ($dbh) {
-        $log->info("Thread DB connection failed");
-        return undef;
-    }
-
-    # Test connection
-    unless ($db->test_connection($dbh)) {
-        $log->info("Thread DB connection test failed");
-        return undef;
-    }
-
-    return $dbh;
-}
 
 =head2 _db_upsert_blocked_ip_batch
 
