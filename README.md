@@ -5,90 +5,152 @@
 [![License](https://img.shields.io/badge/license-Proprietary-red.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Debian%20%7C%20Ubuntu-orange.svg)](https://projects.thedude.vip/bad-ips/)
 
-**A distributed IP blocking system with centralized database for real-time threat sharing across your infrastructure.**
+# BadIPs
 
-> ⚠️ **ALPHA STATUS**: This software is currently in alpha testing. While it is being actively tested on live production servers, it may contain bugs and the configuration format may change in future releases. Use with appropriate caution and testing in your environment.
+BadIPs is a distributed, log-driven IP blocking daemon for Linux systems built around nftables, Perl, and an optional central PostgreSQL database.
 
----
+It monitors logs from systemd journald units and/or plain log files, detects suspicious activity using configurable patterns, blocks offending IPs locally using nftables sets with timeouts, and can optionally share those blocks across an entire server fleet.
 
-## 🚀 Quick Start
-
-Install Bad IPs on Ubuntu/Debian with a single command:
-
-```bash
-bash <(curl -fsSL https://projects.thedude.vip/bad-ips/install.sh)
-```
-
-The installer will:
-- ✅ Add the Silver Linings, LLC apt repository
-- ✅ Install Bad IPs and all dependencies
-- ✅ Configure your PostgreSQL database
-- ✅ Set up detectors for your services
-- ✅ Start monitoring automatically
+This is **not Fail2ban**.  
+BadIPs is a coordinated, deterministic, network-wide ban system intended for environments with multiple servers and a desire for shared intelligence and predictable behavior.
 
 ---
 
-## 📖 Full Documentation
+## Why BadIPs Exists
 
-**For complete documentation, configuration guides, and examples, visit:**
+Fail2ban works well on a single host, but it becomes harder to reason about at scale. It does not natively share bans across machines, provides limited long-term visibility into why an IP was banned, and can be awkward to reload or extend cleanly in more complex environments.
 
-### 🌐 [https://projects.thedude.vip/bad-ips/](https://projects.thedude.vip/bad-ips/)
-
-The documentation includes:
-- 📚 Configuration reference
-- 🔧 Detector setup guides
-- 🗄️ Database configuration
-- 🎯 Pattern matching examples
-- 🚀 Advanced deployment scenarios
-- 🐛 Troubleshooting guides
+BadIPs was designed to address these issues by clearly separating detection, blocking, and synchronization. It allows bans to be shared across hosts when desired, uses nftables sets with timeouts for efficient blocking, and emphasizes explicit control, clarity, and debuggability.
 
 ---
 
-## 📋 Overview
+## High-Level Architecture
 
-Bad IPs monitors your system logs for malicious activity and automatically blocks offending IP addresses using nftables. With a **centralized PostgreSQL database**, threats detected on one server are immediately shared across your entire infrastructure.
+BadIPs runs as a single supervisor process that manages multiple worker threads. All communication happens via thread-safe queues.
 
-### The NATO Effect
+Logs (journald units and files)  
+→ Pattern matching and detection  
+→ IP extraction  
+→ ips_to_block_queue  
+→ nft_blocker thread → nftables sets (with TTL)  
+→ sync_to_central_db_queue  
+→ central_db_sync thread → PostgreSQL  
+← pull_global_blocks thread ← PostgreSQL  
 
-> *"An attack on one is an attack on all."*
-
-When any server blocks an IP, that IP is automatically shared with **all servers** connected to your database. An attacker trying to brute force SSH on your mail server will be instantly blocked on your web servers, DNS servers, and everything else.
-
----
-
-## ✨ Key Features
-
-- 🔍 **Real-time log monitoring** via systemd journal and file tailing
-- 🚫 **Automatic IP blocking** using nftables with configurable timeouts
-- 🗄️ **Centralized PostgreSQL database** for threat intelligence sharing
-- ⚡ **Multi-threaded async architecture** with queue-based pipeline
-- 🎯 **Configurable detectors** for SSH, mail, web, DNS, and custom services
-- 🛡️ **Never-block CIDR filtering** to protect trusted networks
-- 🔄 **Automatic expiration** and cleanup of stale blocks
-- 📊 **Fast local blocking** with <1ms response time
-- 🔧 **Live configuration reload** via systemctl reload
+No worker directly calls another worker. Shutdowns and reloads are coordinated via shared flags.
 
 ---
 
-## 🤝 Contributing
+## Core Features
 
-This is proprietary software by Silver Linings, LLC. For support, feature requests, or bug reports, please contact the maintainer or file an issue.
+### Log-Driven Blocking
+
+- Reads from systemd journald units and plain log files
+- Supports IPv4 and IPv6
+- Uses configurable regular expression patterns
+- Extracts all IPs from matching log lines
+
+### nftables-Native
+
+- Uses nftables sets with timeouts
+- No rule churn
+- Fast lookups
+- Clean expiration handling
+
+### Distributed Intelligence (Optional)
+
+- Blocks detected on one host can be shared with all hosts
+- Uses PostgreSQL as a coordination backend
+- Prevents re-learning the same attackers everywhere
+
+### Public Blocklist Plugins
+
+- Plugin framework for external blocklists
+- Each plugin runs in its own thread
+- Plugins enqueue IPs using the same mechanism as detectors
+- External data ingestion is isolated from core logic
+
+### Safe Reloads
+
+- SIGHUP triggers:
+  - worker shutdown
+  - configuration reload
+  - nftables static set refresh
+  - worker restart
+- No process restart required
+- Designed to avoid partial or inconsistent state
+
+### Graceful Shutdown
+
+- Queues are drained
+- Workers are joined cleanly
+- Timeouts are enforced
+- Remaining work is logged explicitly
 
 ---
 
-## 📄 License
+## What This Is Not
 
-Proprietary - Silver Linings, LLC
+- Not a GUI tool
+- Not a firewall frontend
+- Not an IDS or IPS replacement
+- Not heuristic or machine-learning based
+- Not “magic”
 
----
-
-## 🔗 Links
-
-- **Documentation**: https://projects.thedude.vip/bad-ips/
-- **Installation**: `bash <(curl -fsSL https://projects.thedude.vip/bad-ips/install.sh)`
-- **APT Repository**: https://projects.thedude.vip/apt/
-- **Support**: File an issue on GitHub
+BadIPs is intentionally deterministic.
 
 ---
 
-Made with ☕ by Silver Linings, LLC
+## Installation Overview
+
+BadIPs is currently alpha software and intended for controlled environments.
+
+A typical installation involves installing Perl dependencies, creating the required nftables sets, optionally provisioning a PostgreSQL database, configuring `badips.conf` and detector configuration files, and starting the daemon. Packaging as a `.deb` is recommended for real deployments.
+
+---
+
+## Configuration Overview
+
+The main configuration file defines nftables details, database connectivity, timing parameters, and global defaults.
+
+Detector configuration files define log sources and matching patterns. Detectors may contribute journald units, file sources, and regular expression patterns. All detector inputs are merged at runtime.
+
+---
+
+## Public Blocklist Plugins
+
+BadIPs supports public blocklist plugins. Each plugin runs in its own thread, fetches and processes its own data, and enqueues IPs for blocking using the same mechanism as log-based detectors. Plugins respect reload and shutdown signals.
+
+---
+
+## Signals
+
+| Signal   | Behavior |
+|----------|----------|
+| SIGTERM  | Graceful shutdown |
+| SIGINT   | Graceful shutdown |
+| SIGQUIT  | Graceful shutdown |
+| SIGHUP   | Reload configuration and restart workers |
+
+---
+
+## Logging
+
+BadIPs uses Log::Log4perl for logging. Thread names are injected into the logging context. Log configuration changes can be detected and trigger worker reloads.
+
+---
+
+## Status
+
+BadIPs is alpha software. It is used in real environments by the author but is still evolving. Expect configuration changes, additional documentation, and new plugins over time.
+
+---
+
+## Philosophy
+
+Make it obvious.  
+Make it boring.  
+Make it correct.
+
+BadIPs favors clarity over cleverness, explicit control over heuristics, and debuggability over magic.
+
