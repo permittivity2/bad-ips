@@ -173,12 +173,37 @@
             </p>
         </div>
 
+        <!-- Version 3.5.2 -->
+        <div class="version-card">
+            <div class="version-header">
+                <div>
+                    <span class="version-number">v3.5.2</span>
+                    <span class="badge badge-latest">LATEST</span>
+                </div>
+                <div class="version-date">May 15, 2026</div>
+            </div>
+
+            <div class="category">
+                <div class="category-title fixed">
+                    <span class="icon">🐛</span> Fixed
+                </div>
+                <ul>
+                    <li><strong>Sudo NOPASSWD Configuration:</strong> Updated nftables command alias to allow <code>nft add element</code> operations for all static sets (<code>never_block</code>, <code>never_block_v6</code>, <code>always_block</code>, <code>always_block_v6</code>). Previously only allowed explicit set names, causing "command not allowed" errors when refreshing static IP lists.</li>
+                    <li><strong>Plugin Configuration Syntax:</strong> Fixed incorrect section header delimiters and plugin names:
+                        <ul style="margin-top: 8px;">
+                            <li>Changed <code>[Plugins::GeneralMonitor]</code> to <code>[Plugins:GeneralLogMonitor]</code> (fixed double colon and incorrect name)</li>
+                            <li>Changed all public blocklist plugin sections from <code>[Plugins:*]</code> to <code>[PublicBlocklistPlugins:*]</code> (Spamhaus, Feodotracker, Blocklist_de, DNSBL_Info, Malwaredomainlist)</li>
+                        </ul>
+                    </li>
+                </ul>
+            </div>
+        </div>
+
         <!-- Version 3.5.1 -->
         <div class="version-card">
             <div class="version-header">
                 <div>
                     <span class="version-number">v3.5.1</span>
-                    <span class="badge badge-latest">LATEST</span>
                 </div>
                 <div class="version-date">May 15, 2026</div>
             </div>
@@ -285,7 +310,7 @@
 
     <footer>
         <p><a href="index.html">← Back to Main</a> | <a href="configuration.html">Configuration Reference</a></p>
-        <p>Bad IPs v3.5.0 - Silver Linings, LLC</p>
+        <p>Bad IPs v3.5.2 - Silver Linings, LLC</p>
     </footer>
 </body>
 </html>
