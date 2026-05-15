@@ -1,6 +1,6 @@
 # 🛡️ Bad IPs - Distributed IP Blocking System
 
-[![Version](https://img.shields.io/badge/version-3.5.0-blue.svg)](https://github.com/permittivity2/bad-ips/releases)
+[![Version](https://img.shields.io/badge/version-3.5.3-blue.svg)](https://github.com/permittivity2/bad-ips/releases)
 [![Status](https://img.shields.io/badge/status-ALPHA-red.svg)](https://github.com/permittivity2/bad-ips)
 [![License](https://img.shields.io/badge/license-Proprietary-red.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Debian%20%7C%20Ubuntu-orange.svg)](https://projects.thedude.vip/bad-ips/)
@@ -100,6 +100,23 @@ No worker directly calls another worker. Shutdowns and reloads are coordinated v
 - Not “magic”
 
 BadIPs is intentionally deterministic.
+
+---
+
+## Firewall Compatibility
+
+BadIPs is compatible with all major Linux firewalls and works alongside them with no conflicts:
+
+- **UFW (Uncomplicated Firewall)** ✅ Fully compatible - both work independently
+- **firewalld** ✅ Compatible - uses separate nftables table
+- **Custom nftables rules** ✅ Compatible - uses isolated `table inet badips`
+- **iptables** ⚠️ Legacy - use nftables instead (iptables-nft compatibility layer supported)
+
+BadIPs operates at the **prerouting hook** with **priority -150**, which runs before most firewall rules. This means:
+- Malicious IPs are dropped before they reach your main firewall
+- Processing overhead is reduced
+- Both systems operate independently with no configuration conflicts
+- No changes to your firewall rules are needed
 
 ---
 

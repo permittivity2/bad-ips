@@ -30,6 +30,16 @@ EOF
     echo -e "${NC}"
 }
 
+# Check if UFW is active
+check_ufw_status() {
+    if command -v ufw >/dev/null 2>&1; then
+        if ufw status 2>/dev/null | grep -q "Status: active"; then
+            return 0  # UFW is active
+        fi
+    fi
+    return 1  # UFW not active or not installed
+}
+
 # Check if running as root
 check_root() {
     if [ "$EUID" -ne 0 ]; then
@@ -174,6 +184,17 @@ show_status() {
     echo ""
     echo "Bad IPs is now monitoring your system and blocking malicious IPs."
     echo ""
+
+    # Inform about UFW compatibility if UFW is active
+    if check_ufw_status; then
+        echo -e "${BLUE}ℹ️  UFW Detected and Compatible${NC}"
+        echo "Bad IPs works seamlessly with UFW:"
+        echo "  • Bad IPs uses 'table inet badips' at prerouting (priority -150)"
+        echo "  • UFW uses 'table inet filter' at input/forward/output (priority 0)"
+        echo "  • Both operate independently with no conflicts"
+        echo ""
+    fi
+
     echo "Useful commands:"
     echo ""
     echo "  Status:      systemctl status bad_ips.service"

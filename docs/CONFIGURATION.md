@@ -61,12 +61,43 @@ db_file = /var/lib/bad_ips/bad_ips.sql
 
 # Nftables settings
 nft_table = inet
-nft_family_table = filter
+nft_family_table = badips
 nft_set = badipv4
 
 # Logging
 log_level = INFO
 ```
+
+### nftables Configuration
+
+Bad IPs uses its own isolated nftables table with dedicated sets for blocking:
+
+```ini
+[global]
+# nftables table family (address family type)
+nft_table = inet              # Use 'inet' for dual-stack (IPv4 and IPv6)
+
+# nftables table name
+nft_family_table = badips     # The table created at /etc/nftables.d/99-badips.nft
+
+# Primary IPv4 set name (IPv6 equivalent is auto-suffixed with _v6)
+nft_set = badipv4             # IPv6 set is automatically badipv6
+```
+
+**How it works:**
+- Bad IPs creates a dedicated `table inet badips` at `/etc/nftables.d/99-badips.nft`
+- This table is completely separate from your main firewall (`inet filter`)
+- The table contains 6 sets:
+  - `badipv4` and `badipv6` - Dynamic IP blocks with automatic timeout
+  - `never_block` and `never_block_v6` - Trusted networks (never blocked)
+  - `always_block` and `always_block_v6` - Permanently blocked IPs
+- The table uses the `prerouting` hook at priority `-150`
+- This means Bad IPs processes traffic **before** your main firewall rules
+
+**Firewall Compatibility:**
+- Works seamlessly with UFW, firewalld, and custom nftables rules
+- No configuration conflicts - each firewall operates independently
+- Bad IPs runs first and drops malicious traffic early, reducing processing overhead
 
 ### Optional Settings
 

@@ -1,4 +1,4 @@
-package BadIPs::PublicBlocklistPlugins::Spamhaus;
+package BadIPs::Plugins::Spamhaus;
 
 use strict;
 use warnings;
@@ -9,11 +9,11 @@ use File::Path qw(make_path);
 use Digest::MD5 qw(md5_hex);
 use Data::Dumper;
 our $VERSION = '3.5.3';
-my $log = get_logger("BadIPs::PublicBlocklistPlugins::Spamhaus");
+my $log = get_logger("BadIPs::Plugins::Spamhaus");
 
 =head1 NAME
 
-BadIPs::PublicBlocklistPlugins::Spamhaus - Plugin to fetch and process Spamhaus blocklists
+BadIPs::Plugins::Spamhaus - Plugin to fetch and process Spamhaus blocklists
 
 =cut
 
@@ -65,19 +65,19 @@ sub run {
 
     my $log = $self->{log};
 
-    my $urls = $conf->{PublicBlocklistPlugins}->{Spamhaus}->{urls} || [];
+    my $urls = $conf->{Plugins}->{Spamhaus}->{urls} || [];
     $urls = [ $urls ] if ref($urls) ne 'ARRAY';
 
-    my $interval   = $conf->{PublicBlocklistPlugins}->{Spamhaus}->{fetch_interval} || 3600;
-    my $use_cache  = defined $conf->{PublicBlocklistPlugins}->{Spamhaus}->{use_cache}
-                     ? $conf->{PublicBlocklistPlugins}->{Spamhaus}->{use_cache}
+    my $interval   = $conf->{Plugins}->{Spamhaus}->{fetch_interval} || 3600;
+    my $use_cache  = defined $conf->{Plugins}->{Spamhaus}->{use_cache}
+                     ? $conf->{Plugins}->{Spamhaus}->{use_cache}
                      : 1;
-    my $cache_path = $conf->{PublicBlocklistPlugins}->{Spamhaus}->{cache_path}
+    my $cache_path = $conf->{Plugins}->{Spamhaus}->{cache_path}
                      || '/var/cache/badips/spamhaus';
 
-    my $active_defined = defined $conf->{PublicBlocklistPlugins}->{Spamhaus}->{active};
+    my $active_defined = defined $conf->{Plugins}->{Spamhaus}->{active};
     my $active = $active_defined
-                 ? $conf->{PublicBlocklistPlugins}->{Spamhaus}->{active}
+                 ? $conf->{Plugins}->{Spamhaus}->{active}
                  : 1;
 
     if ($active_defined && !$active) {

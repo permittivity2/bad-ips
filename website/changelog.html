@@ -173,12 +173,42 @@
             </p>
         </div>
 
+        <!-- Version 3.5.1 -->
+        <div class="version-card">
+            <div class="version-header">
+                <div>
+                    <span class="version-number">v3.5.1</span>
+                    <span class="badge badge-latest">LATEST</span>
+                </div>
+                <div class="version-date">May 15, 2026</div>
+            </div>
+
+            <div class="category">
+                <div class="category-title added">
+                    <span class="icon">✨</span> Added
+                </div>
+                <ul>
+                    <li><strong>UFW Detection:</strong> Installer now detects UFW (Uncomplicated Firewall) and displays compatibility information</li>
+                    <li><strong>Firewall Compatibility Documentation:</strong> Added comprehensive documentation explaining Bad IPs compatibility with UFW, firewalld, and custom nftables configurations</li>
+                    <li><strong>nftables Configuration Guide:</strong> New section in CONFIGURATION.md documenting the isolated <code>table inet badips</code> architecture</li>
+                </ul>
+            </div>
+
+            <div class="category">
+                <div class="category-title fixed">
+                    <span class="icon">🐛</span> Fixed
+                </div>
+                <ul>
+                    <li><strong>Configuration Template Bug:</strong> Fixed <code>nft_family_table</code> in template from <code>filter</code> to <code>badips</code> to match actual table created since v3.2.1</li>
+                </ul>
+            </div>
+        </div>
+
         <!-- Version 3.5.0 -->
         <div class="version-card">
             <div class="version-header">
                 <div>
                     <span class="version-number">v3.5.0</span>
-                    <span class="badge badge-latest">LATEST</span>
                 </div>
                 <div class="version-date">December 21, 2025</div>
             </div>

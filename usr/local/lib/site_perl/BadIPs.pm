@@ -28,7 +28,7 @@ $Data::Dumper::Indent   = 1;
 
 my $log = get_logger("BadIPs") || die "You MUST initialize Log::Log4perl before using BadIPs module";
 
-our $VERSION = '3.5.0';
+our $VERSION = '3.5.3';
 
 # -------------------------------------------------------------------------
 # Shared state for all threads
@@ -515,6 +515,16 @@ sub _load_config {
             }
         }
 
+        # Process [Plugins:*] sections
+        for my $section (keys %$c) {
+            if ($section =~ /^Plugins:(.+)/) {
+                my $plugin_name = $1;
+                my $p = $c->{$section};
+                $accum{Plugins}->{$plugin_name} = $p;
+                $log->debug("Loaded Plugin config: $plugin_name") if $log;
+            }
+        }
+
         # Process [detector:*] sections
         for my $section (keys %$c) {
             if ($section =~ /^detector:(.+)/) {
@@ -861,7 +871,11 @@ sub _start_worker_threads {
     $log->info("Activating PublicBlocklistPlugins");
     $self->_start_publicblocklist_plugins();
 
-    $log->info("All worker threads started");
+    # Start other Plugins
+    $log->info("Activating Plugins");
+    $self->_start_plugins();
+
+    $log->info("Processed all worker, PublicBlocklistPlugin, and Plugin threads for startup");
 }
 
 =head2 _shutdown_and_join_workers
@@ -895,27 +909,48 @@ sub _shutdown_and_join_workers {
     $log->info("Joining worker threads: " . join(", ", @thread_info));
 
     my $graceful_timeout = $self->{conf}->{graceful_shutdown_timeout} || 300;
+    my $max_wait_until = time() + $graceful_timeout;
     $log->info("Allowing up to ${graceful_timeout}s for all threads to exit gracefully");
+    while (time() < $max_wait_until) {
+        my $all_joined = 1;
+        for my $wt (@{$self->{threads} || []}) {
+            my $name = $wt->{name};
+            my $thr  = $wt->{thread};
+            next unless $thr;
+            if ($thr->is_joinable) {
+                eval { $thr->join() };
+                if ($@) {
+                    $log->error("Thread $name join died: $@");
+                } else {
+                    $log->info("Worker thread $name joined successfully");
+                }
+            } else {
+                $all_joined = 0;
+            }
+        }
+        last if $all_joined;
+        Time::HiRes::usleep(500_000);  # Sleep 0.5s before re-checking
+    }
+    # Final check for any remaining threads
+    # If any threads are still running, detach them and log error
     for my $wt (@{$self->{threads} || []}) {
         my $name = $wt->{name};
         my $thr  = $wt->{thread};
         next unless $thr;
-        $log->info("Joining worker thread $name");
-        my $join_result = $self->_join_with_timeout(
-                thread  => $thr,
-                name    => $name,
-                timeout => $graceful_timeout,
-            );
-        if (!$join_result) {
+        if (!$thr->is_joinable) {
             $log->error("Worker thread $name did not exit in time, detaching");
             eval { $thr->detach() };
             if ($@) {
                 $log->error("Failed to detach thread $name: $@");
                 $log->logdie("Cannot continue with stuck worker threads!!!!  Please investigate.");
             }
-        } else {
-            $log->info("Worker thread $name joined successfully");
         }
+    }
+    
+    if (time() >= $max_wait_until) {
+        $log->error("Not all worker threads exited within the graceful shutdown timeout");
+    } else {
+        $log->info("All worker threads exited gracefully");
     }
 
     $self->{threads} = [];
@@ -943,36 +978,62 @@ Returns:
 sub _handle_reload_request {
     my ($self) = @_;
 
-    # 1) Request existing workers to exit via queue end
     $log->info("Reload: ending queues to allow workers to exit");
     $ips_to_block_queue->end()       if $ips_to_block_queue;
     $sync_to_central_db_queue->end() if $sync_to_central_db_queue;
 
-    # 2) Join worker threads
+    $self->_drain_queues();
+
+    # Join existing worker threads
+    $log->info("Reload: joining existing worker threads");
+    # Get max graceful shutdown timeout, we'll use that for the reload join as well
+    my $graceful_timeout = $self->{conf}->{graceful_shutdown_timeout} || 300;
+    my $max_wait_until = time() + $graceful_timeout;
+    while (time() < $max_wait_until) {
+        my $all_joined = 1;
+        for my $wt (@{$self->{threads} || []}) {
+            my $name = $wt->{name};
+            my $thr  = $wt->{thread};
+            next unless $thr;
+            if ($thr->is_joinable) {
+                eval { $thr->join() };
+                if ($@) {
+                    $log->error("Thread $name join died: $@");
+                } else {
+                    $log->info("Worker thread $name joined successfully");
+                }
+            } else {
+                $all_joined = 0;
+            }
+        }
+        last if $all_joined;
+        Time::HiRes::usleep(500_000);  # Sleep 0.5s before re-checking
+    }
+    # Final check for any remaining threads
+    # If any threads are still running, detach them and log error
+    # (we cannot die here because we need to continue with reload)
     for my $wt (@{$self->{threads} || []}) {
         my $name = $wt->{name};
         my $thr  = $wt->{thread};
         next unless $thr;
-        $log->info("Reload: joining worker thread $name");
-        my $join_result = $self->_join_with_timeout(
-                thread  => $thr,
-                name    => $name,
-                timeout => $self->{conf}->{graceful_shutdown_timeout} || 30,
-            );
-        if (!$join_result) {
+        if (!$thr->is_joinable) {
             $log->error("Reload: worker thread $name did not exit in time, detaching");
             eval { $thr->detach() };
             if ($@) {
-                $log->error("Reload: failed to detach thread $name: $@");
-                $log->logdie("Cannot continue with stuck worker threads!!!!  Please investigate.");
+                $log->fatal("Reload: failed to detach thread $name: $@");
             }
-        } else {
-            $log->info("Reload: worker thread $name joined successfully");
+            else {
+                $log->info("Reload: worker thread $name killed and detached successfully");
+            }
         }
+    }
+    if (time() >= $max_wait_until) {
+        $log->error("Reload: not all worker threads exited within the graceful timeout");
+    } else {
+        $log->info("Reload: all worker threads exited successfully");
     }
     $self->{threads} = [];
 
-    # 3) Reload config
     eval {
         $self->{conf} = $self->_load_config();
         $self->_auto_discover_sources();
@@ -983,13 +1044,10 @@ sub _handle_reload_request {
         $log->info("Reload failed: $@ (continuing with previous configuration)");
     }
 
-    # 4) Re-init queues and restart workers
     $self->_init_queues();
 
-    # 5) Clear reload flag before starting workers to avoid race
     _clear_reload_flag();
 
-    # 6) Restart workers
     $self->_start_worker_threads();
 }
 
@@ -1505,10 +1563,11 @@ sub _start_publicblocklist_plugins {
 
         # Args passed into plugin->new(...)
         my %class_args = (
-            conf           => $conf,
-            reload_check   => \&_get_reload_flag,
-            shutdown_check => \&_get_shutdown_flag,
-            enqueue_ip     => sub {
+            conf              => $conf,
+            reload_check      => \&_get_reload_flag,
+            shutdown_check    => \&_get_shutdown_flag,
+            is_never_block_ip => \&_is_never_block_ip,
+            enqueue_ip        => sub {
                 my ($ip_item) = @_;
                 $ips_to_block_queue->enqueue($ip_item);
             },
@@ -1548,6 +1607,60 @@ sub _start_publicblocklist_plugins {
 
     return 1;
 }
+
+=head2 _start_plugins
+
+Description:
+    Helper sub that starts threads for each active plugin
+    configured in conf.d. Each plugin runs in its own thread and is
+    responsible for its own functionality.
+
+Returns:
+    Nothing.
+=cut
+
+sub _start_plugins {
+    my ($self) = @_;
+    my $conf = dclone($self->{conf}) || {};
+
+    my @plugins = keys %{ $conf->{Plugins} || {} };
+    return unless @plugins;
+
+    for my $plugin (@plugins) {
+        my $pc = $conf->{Plugins}{$plugin} || {};
+        next unless $pc->{active};
+
+        my $class = "BadIPs::Plugins::$plugin";
+        (my $file = $class) =~ s!::!/!g;
+        $file .= '.pm';
+
+        eval { require $file; 1 } or do {
+            $log->error("Failed to load plugin $plugin: $@");
+            next;
+        };
+
+        my $obj = eval {
+            $class->new(
+                conf              => $conf,
+                enqueue_ip        => sub { $ips_to_block_queue->enqueue(@_) },
+                shutdown_check    => \&_get_shutdown_flag,
+                reload_check      => \&_get_reload_flag,
+                is_never_block_ip => \&_is_never_block_ip,
+                log               => get_logger($class),
+            );
+        };
+        if (!$obj || !$obj->can('run')) {
+            $log->error("Plugin $plugin is invalid or missing run()");
+            next;
+        }
+
+        my $thr = threads->create(sub { $obj->run() });
+        push @{ $self->{threads} }, { name => $class, thread => $thr };
+
+        $log->info("Started plugin: $plugin (TID " . $thr->tid . ")");
+    }
+}
+
 
 # -------------------------------------------------------------------------
 # IP helper, static sets, and in-memory cache
@@ -2265,6 +2378,7 @@ sub _remote_addresses {
 
     return [ map { { ip => $_, metadata => $ip_metadata{$_} } } @ips ];
 }
+
 
 1;
 

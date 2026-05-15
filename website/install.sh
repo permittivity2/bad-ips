@@ -135,6 +135,16 @@ check_nftables() {
     return 0
 }
 
+# Check if UFW is active
+check_ufw_status() {
+    if command -v ufw >/dev/null 2>&1; then
+        if ufw status 2>/dev/null | grep -q "Status: active"; then
+            return 0  # UFW is active
+        fi
+    fi
+    return 1  # UFW not active or not installed
+}
+
 # Check if running as root
 check_root() {
     if [[ $EUID -ne 0 ]]; then
@@ -335,6 +345,157 @@ test_pg_connection_with_retry() {
     return 1
 }
 
+# Verify database user has required permissions
+verify_database_permissions() {
+    local DB_HOST=$1
+    local DB_PORT=$2
+    local DB_NAME=$3
+    local DB_USER=$4
+    local DB_PASSWORD=$5
+
+    echo -n "Checking database permissions... "
+
+    # Check if table exists
+    local TABLE_EXISTS=$(PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -tAc \
+        "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'jailed_ips';" 2>/dev/null)
+
+    if [ "$TABLE_EXISTS" != "1" ]; then
+        echo -e "${YELLOW}⚠${NC}"
+        echo ""
+        echo -e "${YELLOW}Table 'jailed_ips' does not exist yet.${NC}"
+        echo "Permissions will be verified after table creation."
+        echo ""
+        return 0
+    fi
+
+    # Check if user is superuser (has all permissions)
+    local IS_SUPERUSER=$(PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -tAc \
+        "SELECT usesuper FROM pg_user WHERE usename = CURRENT_USER;" 2>/dev/null)
+
+    if [ "$IS_SUPERUSER" = "t" ]; then
+        echo -e "${GREEN}✓${NC} (superuser)"
+        return 0
+    fi
+
+    # Check if user is table owner (has all permissions)
+    local IS_OWNER=$(PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -tAc \
+        "SELECT CASE WHEN tableowner = CURRENT_USER THEN 't' ELSE 'f' END
+         FROM pg_tables WHERE schemaname = 'public' AND tablename = 'jailed_ips';" 2>/dev/null)
+
+    if [ "$IS_OWNER" = "t" ]; then
+        echo -e "${GREEN}✓${NC} (table owner)"
+        return 0
+    fi
+
+    # Check actual permissions
+    local TABLE_PRIVS=$(PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -tAc \
+        "SELECT privilege_type FROM information_schema.table_privileges
+         WHERE table_schema = 'public' AND table_name = 'jailed_ips'
+         AND grantee IN (CURRENT_USER, 'PUBLIC');" 2>/dev/null)
+
+    local SEQ_PRIVS=$(PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -tAc \
+        "SELECT privilege_type FROM information_schema.usage_privileges
+         WHERE object_schema = 'public' AND object_name = 'jailed_ips_id_seq'
+         AND grantee IN (CURRENT_USER, 'PUBLIC');" 2>/dev/null)
+
+    # If queries failed, we can't verify - continue with warning
+    if [ -z "$TABLE_PRIVS" ] && [ -z "$SEQ_PRIVS" ]; then
+        echo -e "${YELLOW}⚠${NC}"
+        echo ""
+        echo -e "${YELLOW}Could not verify permissions (insufficient access to system catalogs)${NC}"
+        echo "Continuing with installation..."
+        echo ""
+        return 0
+    fi
+
+    # Check what's missing
+    local MISSING_PRIVS=()
+
+    if ! echo "$TABLE_PRIVS" | grep -q "SELECT"; then
+        MISSING_PRIVS+=("SELECT on table jailed_ips")
+    fi
+    if ! echo "$TABLE_PRIVS" | grep -q "INSERT"; then
+        MISSING_PRIVS+=("INSERT on table jailed_ips")
+    fi
+    if ! echo "$TABLE_PRIVS" | grep -q "UPDATE"; then
+        MISSING_PRIVS+=("UPDATE on table jailed_ips")
+    fi
+    if ! echo "$SEQ_PRIVS" | grep -q "USAGE"; then
+        MISSING_PRIVS+=("USAGE on sequence jailed_ips_id_seq")
+    fi
+
+    # All permissions present
+    if [ ${#MISSING_PRIVS[@]} -eq 0 ]; then
+        echo -e "${GREEN}✓${NC}"
+        return 0
+    fi
+
+    # Display missing permissions and provide instructions
+    echo -e "${YELLOW}⚠${NC}"
+    echo ""
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${YELLOW}  MISSING DATABASE PERMISSIONS${NC}"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo "The user '$DB_USER' is missing required permissions:"
+    for priv in "${MISSING_PRIVS[@]}"; do
+        echo "  - $priv"
+    done
+    echo ""
+    echo "To grant these permissions, run this command on the database server:"
+    echo ""
+    echo -e "${CYAN}  ssh $DB_HOST \"sudo -u postgres psql $DB_NAME <<'SQL'${NC}"
+    echo -e "${CYAN}  GRANT SELECT, INSERT, UPDATE ON jailed_ips TO $DB_USER;${NC}"
+    echo -e "${CYAN}  GRANT USAGE, SELECT ON SEQUENCE jailed_ips_id_seq TO $DB_USER;${NC}"
+    echo -e "${CYAN}  SQL\"${NC}"
+    echo ""
+    echo "Or if you have the database owner credentials:"
+    echo ""
+    echo -e "${CYAN}  PGPASSWORD='<owner_password>' psql -h $DB_HOST -p $DB_PORT -U <owner> -d $DB_NAME <<'SQL'${NC}"
+    echo -e "${CYAN}  GRANT SELECT, INSERT, UPDATE ON jailed_ips TO $DB_USER;${NC}"
+    echo -e "${CYAN}  GRANT USAGE, SELECT ON SEQUENCE jailed_ips_id_seq TO $DB_USER;${NC}"
+    echo -e "${CYAN}  SQL${NC}"
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+
+    # Prompt for action
+    echo "What would you like to do?"
+    echo "  1) I've granted the permissions - retry the check"
+    echo "  2) Continue anyway (service will fail at runtime)"
+    echo "  3) Go back and reconfigure database"
+    echo ""
+
+    while true; do
+        read -p "Choice [1]: " PERM_CHOICE
+        PERM_CHOICE=${PERM_CHOICE:-1}
+
+        case $PERM_CHOICE in
+            1)
+                echo ""
+                # Retry the check
+                verify_database_permissions "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$DB_PASSWORD"
+                return $?
+                ;;
+            2)
+                echo ""
+                echo -e "${YELLOW}⚠ Continuing with insufficient permissions${NC}"
+                echo -e "${YELLOW}⚠ The Bad IPs service will fail until permissions are granted${NC}"
+                echo ""
+                sleep 2
+                return 1  # Return failure but continue installation
+                ;;
+            3)
+                echo ""
+                return 2  # Signal to reconfigure
+                ;;
+            *)
+                echo "Invalid choice. Please enter 1, 2, or 3."
+                ;;
+        esac
+    done
+}
+
 # Check if PostgreSQL is installed
 is_postgresql_installed() {
     dpkg -l | grep -q "^ii.*postgresql-[0-9]" 2>/dev/null
@@ -516,6 +677,17 @@ configure_database() {
                     echo "Database exists but tables are missing. Creating tables..."
                     setup_postgresql_database "$DB_USER" "$DB_PASSWORD"
                 fi
+
+                # Verify permissions on the tables
+                echo ""
+                verify_database_permissions "localhost" "$DB_PORT" "$DB_NAME" "$DB_USER" "$DB_PASSWORD"
+                local VERIFY_RESULT=$?
+
+                if [ $VERIFY_RESULT -eq 2 ]; then
+                    # User chose to reconfigure - restart the configuration
+                    configure_database
+                    return $?
+                fi
             else
                 echo -e "${RED}✗${NC} Connection failed!"
                 echo ""
@@ -669,6 +841,17 @@ SQL
                         echo ""
                     fi
                     rm -f "$tmpout"
+                fi
+
+                # Verify permissions on the tables
+                echo ""
+                verify_database_permissions "$DB_HOST" "$DB_PORT" "$DB_NAME" "$DB_USER" "$DB_PASSWORD"
+                local VERIFY_RESULT=$?
+
+                if [ $VERIFY_RESULT -eq 2 ]; then
+                    # User chose to reconfigure - restart the configuration
+                    configure_database
+                    return $?
                 fi
             fi
         fi
@@ -1308,6 +1491,20 @@ reload_nftables() {
 setup_nftables() {
     echo ""
     echo -e "${BLUE}Setting up nftables firewall rules...${NC}"
+
+    # Check for UFW and inform user of compatibility
+    if check_ufw_status; then
+        echo ""
+        echo -e "${BLUE}ℹ️  UFW Detected${NC}"
+        echo "Bad IPs is fully compatible with UFW. The two systems work independently:"
+        echo "  • Bad IPs uses 'table inet badips' at prerouting (priority -150)"
+        echo "  • UFW uses 'table inet filter' at input/forward/output (priority 0)"
+        echo "  • Bad IPs runs first and drops malicious IPs before they reach UFW"
+        echo ""
+        echo "No additional configuration needed - both will work together seamlessly."
+        echo ""
+        sleep 2  # Give user time to read
+    fi
 
     # Check if nftables is installed
     check_nftables_package
