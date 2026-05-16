@@ -8,7 +8,7 @@ use Regexp::Common qw(net);  # Exports %RE{net}
 use Data::Dumper;
 use List::Util qw(any);
 use JSON qw(decode_json);
-our $VERSION = '3.5.6';
+our $VERSION = '3.5.7';
 
 my $log = get_logger();
 
@@ -33,7 +33,13 @@ sub new {
         plugin_section => $args{plugin_section} || '',
     };
 
-    my $plugin_confs = $self->{conf}->get_block( section => $self->{plugin_section} );
+    # Extract plugin configuration from nested hash
+    # plugin_section is "Plugins:GeneralLogMonitor"
+    my $plugin_confs = {};
+    if ($self->{plugin_section} && $self->{plugin_section} =~ /^Plugins:(.+)$/) {
+        my $plugin_name = $1;
+        $plugin_confs = $self->{conf}->{Plugins}->{$plugin_name} || {};
+    }
     $self->{monitor_method} = $plugin_confs->{monitor_method} || 'auto';
 
     # Parse journal units (comma-separated list)
