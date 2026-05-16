@@ -269,14 +269,6 @@ else
     echo "Please ensure nftables infrastructure exists before starting service"
 fi
 
-# Setup nftables (if service is active)
-# The nftables infrastructure is created by /usr/local/sbin/bad_ips_installer.sh
-# This was called earlier in postinst
-if systemctl is-active --quiet nftables.service; then
-    echo "Reloading nftables service..."
-    systemctl reload nftables.service || true
-fi
-
 # Run database migration if database exists
 if [ -f /var/lib/bad_ips/bad_ips.sql ]; then
     echo "Checking database schema version..."
