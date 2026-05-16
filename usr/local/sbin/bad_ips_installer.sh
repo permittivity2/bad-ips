@@ -3,7 +3,7 @@ set -e
 
 # ============================================================================
 # Bad IPs nftables Infrastructure Installer
-# Creates required nftables table, sets, chain, and rules for Bad IPs service
+# Creates persistent nftables table, sets, chain, and rules for Bad IPs service
 # ============================================================================
 
 # Color codes
@@ -26,33 +26,86 @@ if ! command -v nft &> /dev/null; then
     exit 1
 fi
 
+# Ensure nftables.d directory exists
+mkdir -p /etc/nftables.d
+
 echo "Creating Bad IPs nftables infrastructure..."
 
-# Create table (safe to run multiple times with nft add)
-nft add table inet badips 2>/dev/null || true
+# Write persistent nftables configuration to file
+cat > /etc/nftables.d/99-badips.nft << 'EOF'
+# Bad IPs nftables configuration
+# This file defines the table, sets, chain, and rules used for IP blocking
 
-# Create sets (nft add is idempotent - safe to run multiple times)
-nft add set inet badips badipv4 '{ type ipv4_addr; flags interval, timeout; comment "Dynamically blocked IPv4"; }' 2>/dev/null || true
-nft add set inet badips badipv6 '{ type ipv6_addr; flags interval, timeout; comment "Dynamically blocked IPv6"; }' 2>/dev/null || true
-nft add set inet badips never_block '{ type ipv4_addr; flags interval; comment "IPv4 never block"; }' 2>/dev/null || true
-nft add set inet badips never_block_v6 '{ type ipv6_addr; flags interval; comment "IPv6 never block"; }' 2>/dev/null || true
-nft add set inet badips always_block '{ type ipv4_addr; flags interval; comment "IPv4 always block"; }' 2>/dev/null || true
-nft add set inet badips always_block_v6 '{ type ipv6_addr; flags interval; comment "IPv6 always block"; }' 2>/dev/null || true
+table inet badips {
+    # IPv4 set for dynamically blocked IPs with automatic expiry
+    set badipv4 {
+        type ipv4_addr
+        flags interval, timeout
+        comment "Dynamically blocked IPv4 addresses"
+    }
 
-# Create chain (safe to run multiple times with nft add)
-nft add chain inet badips preroute_block '{ type filter hook prerouting priority -150; policy accept; }' 2>/dev/null || true
+    # IPv6 set for dynamically blocked IPs with automatic expiry
+    set badipv6 {
+        type ipv6_addr
+        flags interval, timeout
+        comment "Dynamically blocked IPv6 addresses"
+    }
 
-# Add rules (flush first to ensure clean slate, then add)
-nft flush chain inet badips preroute_block 2>/dev/null || true
-nft add rule inet badips preroute_block ip saddr @never_block accept 2>/dev/null || true
-nft add rule inet badips preroute_block ip saddr @always_block counter drop 2>/dev/null || true
-nft add rule inet badips preroute_block ip saddr @badipv4 counter drop 2>/dev/null || true
-nft add rule inet badips preroute_block ip6 saddr @never_block_v6 accept 2>/dev/null || true
-nft add rule inet badips preroute_block ip6 saddr @always_block_v6 counter drop 2>/dev/null || true
-nft add rule inet badips preroute_block ip6 saddr @badipv6 counter drop 2>/dev/null || true
+    # IPv4 set for IPs that should never be blocked
+    set never_block {
+        type ipv4_addr
+        flags interval
+        comment "IPv4 addresses that should never be blocked"
+    }
+
+    # IPv6 set for IPs that should never be blocked
+    set never_block_v6 {
+        type ipv6_addr
+        flags interval
+        comment "IPv6 addresses that should never be blocked"
+    }
+
+    # IPv4 set for IPs that should always be blocked
+    set always_block {
+        type ipv4_addr
+        flags interval
+        comment "IPv4 addresses that should always be blocked"
+    }
+
+    # IPv6 set for IPs that should always be blocked
+    set always_block_v6 {
+        type ipv6_addr
+        flags interval
+        comment "IPv6 addresses that should always be blocked"
+    }
+
+    # Chain for blocking rules applied at prerouting hook
+    chain preroute_block {
+        type filter hook prerouting priority -150
+        policy accept
+        comment "Bad IPs blocking rules"
+
+        # Allow never-block list
+        ip saddr @never_block accept comment "IPv4 never-block exception"
+        ip6 saddr @never_block_v6 accept comment "IPv6 never-block exception"
+
+        # Block always-block list
+        ip saddr @always_block counter drop comment "IPv4 always-block enforcement"
+        ip6 saddr @always_block_v6 counter drop comment "IPv6 always-block enforcement"
+
+        # Block dynamically detected IPs
+        ip saddr @badipv4 counter drop comment "IPv4 dynamic block"
+        ip6 saddr @badipv6 counter drop comment "IPv6 dynamic block"
+    }
+}
+EOF
+
+# Load the configuration into running kernel
+nft -f /etc/nftables.d/99-badips.nft
 
 echo -e "${GREEN}✓ Bad IPs nftables infrastructure created successfully${NC}"
 echo ""
+echo "Configuration saved to: /etc/nftables.d/99-badips.nft"
 echo "You can now start the bad_ips service:"
 echo "  systemctl start bad_ips.service"
 exit 0

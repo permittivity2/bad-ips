@@ -4,7 +4,7 @@ use strict;
 use warnings;
 use Log::Log4perl qw(get_logger);
 
-our $VERSION = '3.5.7';
+our $VERSION = '3.5.8';
 
 my $log = get_logger("BadIPs::DB");
 

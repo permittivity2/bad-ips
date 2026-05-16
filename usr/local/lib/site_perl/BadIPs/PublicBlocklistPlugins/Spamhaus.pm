@@ -8,7 +8,7 @@ use Regexp::Common qw(net);  # Exports %RE{net}
 use File::Path qw(make_path);
 use Digest::MD5 qw(md5_hex);
 use Data::Dumper;
-our $VERSION = '3.5.7';
+our $VERSION = '3.5.8';
 my $log = get_logger("BadIPs::PublicBlocklistPlugins::Spamhaus");
 
 =head1 NAME

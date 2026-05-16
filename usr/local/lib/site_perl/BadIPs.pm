@@ -28,7 +28,7 @@ $Data::Dumper::Indent   = 1;
 
 my $log = get_logger("BadIPs") || die "You MUST initialize Log::Log4perl before using BadIPs module";
 
-our $VERSION = '3.5.7';
+our $VERSION = '3.5.8';
 
 # -------------------------------------------------------------------------
 # Shared state for all threads
