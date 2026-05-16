@@ -3,7 +3,7 @@ Version: 3.5.5
 Section: admin
 Priority: optional
 Architecture: all
-Depends: perl, nftables, postgresql-client, libconfig-tiny-perl, libdbi-perl, libdbd-pg-perl, libjson-perl, libnet-cidr-perl, liblog-log4perl-perl, libfile-readbackwards-perl, libregexp-common-perl, libwww-perl
+Depends: perl, nftables, postgresql-client, libconfig-tiny-perl, libdbi-perl, libdbd-pg-perl, libjson-perl, libnet-cidr-perl, liblog-log4perl-perl, libfile-readbackwards-perl, libfile-slurp-perl, libregexp-common-perl, libwww-perl
 Maintainer: Gardner <gardner@homelab>
 Description: Distributed IP blocking system with centralized database (ALPHA)
  Bad IPs monitors system logs for malicious activity and automatically blocks
