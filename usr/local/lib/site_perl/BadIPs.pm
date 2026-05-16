@@ -1772,6 +1772,7 @@ sub _start_plugins {
         my $obj = eval {
             $class->new(
                 conf              => $conf,
+                plugin_section    => "Plugins:$plugin",
                 enqueue_ip        => sub {
                     my (%args) = @_;
                     $ips_to_block_queue->enqueue(\%args);
