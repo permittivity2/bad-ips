@@ -1254,50 +1254,12 @@ check_nftables_package() {
     fi
 }
 
-# Check nftables service state
-check_nftables_service() {
-    local NFT_ENABLED=0
-    local NFT_ACTIVE=0
-
-    if systemctl is-enabled --quiet nftables.service 2>/dev/null; then
-        NFT_ENABLED=1
-    fi
-
+# Check if nftables service is currently active (to populate static sets)
+check_nftables_active() {
     if systemctl is-active --quiet nftables.service 2>/dev/null; then
-        NFT_ACTIVE=1
+        return 0  # nftables is active
     fi
-
-    if [ $NFT_ENABLED -eq 0 ] || [ $NFT_ACTIVE -eq 0 ]; then
-        echo ""
-        echo "═══════════════════════════════════════════════════════════"
-        echo "  NOTICE: nftables service is not enabled/running"
-        echo "═══════════════════════════════════════════════════════════"
-        echo ""
-
-        if [ $NFT_ENABLED -eq 0 ]; then
-            echo "Status: nftables.service is DISABLED"
-        fi
-        if [ $NFT_ACTIVE -eq 0 ]; then
-            echo "Status: nftables.service is NOT RUNNING"
-        fi
-
-        echo ""
-        echo "Bad IPs installation will continue, but the service will be"
-        echo "disabled until you enable and start nftables."
-        echo ""
-        echo "The bad_ips service will be installed but kept disabled."
-        echo ""
-
-        read -p "Continue with installation? [Y/n]: " CONTINUE
-        if [[ "$CONTINUE" =~ ^[Nn]$ ]]; then
-            echo "Installation cancelled."
-            exit 0
-        fi
-
-        return 1  # nftables not ready
-    fi
-
-    return 0  # nftables ready
+    return 1  # nftables is not active
 }
 
 # Backup existing nftables configuration
@@ -1459,8 +1421,8 @@ setup_nftables() {
     # Check if nftables is installed
     check_nftables_package
 
-    # Check if nftables service is enabled/active
-    if check_nftables_service; then
+    # Check if nftables service is active (for optional static set population)
+    if check_nftables_active; then
         NFT_READY=1
     else
         NFT_READY=0
