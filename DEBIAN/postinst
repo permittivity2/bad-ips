@@ -248,15 +248,33 @@ SYSDEOF
 
 echo "✓ Systemd drop-in configuration created"
 
-# Setup nftables (if service is active)
-# The nftables configuration is managed by /etc/nftables.d/99-badips.nft
-# This file is created by the installer script and loaded automatically
-if systemctl is-active --quiet nftables.service; then
-    echo "Reloading nftables to apply Bad IPs configuration..."
-    systemctl reload nftables.service || true
+# ============================================================================
+# 6.5. Create nftables infrastructure
+# ============================================================================
+echo "Creating nftables infrastructure..."
+
+if [ -f /usr/local/sbin/bad_ips_installer.sh ]; then
+    chmod +x /usr/local/sbin/bad_ips_installer.sh
+
+    if /usr/local/sbin/bad_ips_installer.sh; then
+        echo "✓ nftables infrastructure created successfully"
+    else
+        echo "ERROR: Failed to create nftables infrastructure"
+        echo "You must run manually before starting service:"
+        echo "  sudo /usr/local/sbin/bad_ips_installer.sh"
+        exit 1
+    fi
 else
-    echo "Note: nftables.service is not active - Bad IPs rules not loaded"
-    echo "      Enable nftables to activate Bad IPs blocking"
+    echo "WARNING: bad_ips_installer.sh not found"
+    echo "Please ensure nftables infrastructure exists before starting service"
+fi
+
+# Setup nftables (if service is active)
+# The nftables infrastructure is created by /usr/local/sbin/bad_ips_installer.sh
+# This was called earlier in postinst
+if systemctl is-active --quiet nftables.service; then
+    echo "Reloading nftables service..."
+    systemctl reload nftables.service || true
 fi
 
 # Run database migration if database exists

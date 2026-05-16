@@ -201,6 +201,15 @@ sub run {
 
     $log->info("Starting BadIPs module run loop");
 
+    # Verify nftables infrastructure before starting
+    eval {
+        $self->_verify_nftables_infrastructure();
+    };
+    if ($@) {
+        $log->fatal("Startup aborted: $@");
+        return 0;
+    }
+
     $self->_install_signal_handlers();
     $self->_start_worker_threads();
 
@@ -352,6 +361,127 @@ sub _install_signal_handlers {
         $log->info("SIGHUP received, requesting reload");
         _set_reload_flag();
     };
+}
+
+=head2 _verify_nftables_infrastructure
+
+Description:
+    Verify that required nftables infrastructure exists before startup.
+    Checks for:
+        - inet badips table
+        - All 6 required sets (badipv4, badipv6, never_block, never_block_v6,
+          always_block, always_block_v6)
+        - preroute_block chain with correct properties
+
+Arguments:
+    (method) $self – object instance.
+
+Returns:
+    1 on success; dies with helpful error message on failure.
+
+=cut
+
+sub _verify_nftables_infrastructure {
+    my ($self) = @_;
+
+    $log->info("Verifying nftables infrastructure...");
+
+    # Use existing sudo permission to get ruleset as JSON
+    my $json_output = `sudo nft -j list ruleset 2>&1`;
+    if ($? != 0) {
+        $log->fatal("Failed to query nftables ruleset");
+        $log->fatal("Error: $json_output");
+        die "Cannot access nftables. Ensure nftables is installed and running.\n";
+    }
+
+    my $ruleset;
+    eval {
+        $ruleset = decode_json($json_output);
+    };
+    if ($@) {
+        $log->fatal("Failed to parse nftables JSON output: $@");
+        die "nftables JSON parsing failed\n";
+    }
+
+    # Find inet badips table
+    my $badips_table;
+    for my $item (@{$ruleset->{nftables}}) {
+        if ($item->{table} &&
+            $item->{table}{family} eq 'inet' &&
+            $item->{table}{name} eq 'badips') {
+            $badips_table = 1;
+            last;
+        }
+    }
+
+    unless ($badips_table) {
+        $log->fatal("nftables table 'inet badips' not found!");
+        $log->fatal("Please create infrastructure: sudo /usr/local/sbin/bad_ips_installer.sh");
+        die "Missing nftables infrastructure. Run: sudo /usr/local/sbin/bad_ips_installer.sh\n";
+    }
+
+    # Check for required sets
+    my @required_sets = (
+        {name => 'badipv4', type => 'ipv4_addr', flags => ['interval', 'timeout']},
+        {name => 'badipv6', type => 'ipv6_addr', flags => ['interval', 'timeout']},
+        {name => 'never_block', type => 'ipv4_addr', flags => ['interval']},
+        {name => 'never_block_v6', type => 'ipv6_addr', flags => ['interval']},
+        {name => 'always_block', type => 'ipv4_addr', flags => ['interval']},
+        {name => 'always_block_v6', type => 'ipv6_addr', flags => ['interval']},
+    );
+
+    my %found_sets;
+    for my $item (@{$ruleset->{nftables}}) {
+        if ($item->{set} &&
+            $item->{set}{family} eq 'inet' &&
+            $item->{set}{table} eq 'badips') {
+            $found_sets{$item->{set}{name}} = $item->{set};
+        }
+    }
+
+    for my $req_set (@required_sets) {
+        unless (exists $found_sets{$req_set->{name}}) {
+            $log->fatal("Required nftables set '$req_set->{name}' not found!");
+            $log->fatal("Please create infrastructure: sudo /usr/local/sbin/bad_ips_installer.sh");
+            die "Missing nftables set: $req_set->{name}. Run: sudo /usr/local/sbin/bad_ips_installer.sh\n";
+        }
+
+        # Verify type and flags
+        my $set = $found_sets{$req_set->{name}};
+        if ($set->{type} ne $req_set->{type}) {
+            $log->fatal("Set '$req_set->{name}' has wrong type: $set->{type} (expected $req_set->{type})");
+            die "Invalid nftables configuration. Run: sudo /usr/local/sbin/bad_ips_installer.sh\n";
+        }
+    }
+
+    # Check for preroute_block chain
+    my $chain_found;
+    for my $item (@{$ruleset->{nftables}}) {
+        if ($item->{chain} &&
+            $item->{chain}{family} eq 'inet' &&
+            $item->{chain}{table} eq 'badips' &&
+            $item->{chain}{name} eq 'preroute_block') {
+
+            # Verify chain properties
+            unless ($item->{chain}{type} eq 'filter' &&
+                    $item->{chain}{hook} eq 'prerouting' &&
+                    defined $item->{chain}{prio}) {
+                $log->fatal("Chain 'preroute_block' exists but has wrong properties");
+                die "Invalid nftables chain configuration. Run: sudo /usr/local/sbin/bad_ips_installer.sh\n";
+            }
+            $chain_found = 1;
+            last;
+        }
+    }
+
+    unless ($chain_found) {
+        $log->fatal("Required nftables chain 'preroute_block' not found!");
+        $log->fatal("Please create infrastructure: sudo /usr/local/sbin/bad_ips_installer.sh");
+        die "Missing nftables chain. Run: sudo /usr/local/sbin/bad_ips_installer.sh\n";
+    }
+
+    $log->info("✓ nftables infrastructure verified successfully");
+    return 1;
 }
 
 =head2 _set_shutdown_flag
