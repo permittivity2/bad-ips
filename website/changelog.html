@@ -197,7 +197,12 @@
                     <span class="icon">🐛</span> Fixed
                 </div>
                 <ul>
-                    <li><strong>GeneralLogMonitor Plugin:</strong> Fixed variable naming inconsistency where plugin was storing log file paths in <code>file_paths</code> but accessing via undefined <code>log_paths</code>, causing plugin initialization to fail.</li>
+                    <li><strong>GeneralLogMonitor Plugin Initialization:</strong> Fixed two issues preventing plugin startup:
+                    <ul>
+                        <li>Variable naming inconsistency where plugin was storing log file paths in <code>file_paths</code> but accessing via undefined <code>log_paths</code></li>
+                        <li>Plugin instantiation code was not passing <code>plugin_section</code> parameter, causing plugins to fail loading their configuration</li>
+                    </ul>
+                    </li>
                 </ul>
             </div>
         </div>
