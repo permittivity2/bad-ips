@@ -8,7 +8,7 @@ use Regexp::Common qw(net);  # Exports %RE{net}
 use Data::Dumper;
 use List::Util qw(any);
 use JSON qw(decode_json);
-our $VERSION = '3.5.10';
+our $VERSION = '3.5.11';
 
 my $log = get_logger();
 
@@ -356,7 +356,7 @@ Returns:
 =cut
 sub _get_journal_lines {
     my ($self, %args) = @_;
-    my @units = $args{units} || [];
+    my @units = @{ $args{units} || $self->{units} || [] };
     my $since_epoch = $args{since_epoch} || time();
     my $until_epoch = $args{until_epoch} || time();
 

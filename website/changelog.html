@@ -173,12 +173,41 @@
             </p>
         </div>
 
+        <!-- Version 3.5.11 -->
+        <div class="version-card">
+            <div class="version-header">
+                <div>
+                    <span class="version-number">v3.5.11</span>
+                    <span class="badge badge-latest">LATEST</span>
+                </div>
+                <div class="version-date">May 15, 2026</div>
+            </div>
+
+            <div class="category">
+                <div class="category-title fixed">
+                    <span class="icon">🐛</span> Fixed
+                </div>
+                <ul>
+                    <li><strong>Critical GeneralLogMonitor Plugin Bug:</strong> Fixed crash in <code>_get_journal_lines()</code> method at line 359 that prevented log monitoring from working. The bug caused shell syntax errors every 2 seconds when unit parameters weren't provided, resulting in "Fetched 0 new relevant log lines" despite dozens of failed SSH attempts. Now correctly falls back to configured journal units when called without explicit parameters.</li>
+                    <li><strong>Installer Idempotency:</strong> The installer script was not truly idempotent - running it multiple times created duplicate rules in the nftables chain. Now uses <code>nft -j list ruleset</code> with <code>jq</code> to check what infrastructure already exists before creating anything, preventing duplicates. Running the installer 3 times now results in exactly 6 rules instead of 18.</li>
+                </ul>
+            </div>
+
+            <div class="category">
+                <div class="category-title added">
+                    <span class="icon">➕</span> Added
+                </div>
+                <ul>
+                    <li><strong>jq Dependency:</strong> Added <code>jq</code> to package dependencies for idempotent installer verification logic.</li>
+                </ul>
+            </div>
+        </div>
+
         <!-- Version 3.5.10 -->
         <div class="version-card">
             <div class="version-header">
                 <div>
                     <span class="version-number">v3.5.10</span>
-                    <span class="badge badge-latest">LATEST</span>
                 </div>
                 <div class="version-date">May 17, 2026</div>
             </div>
@@ -496,7 +525,7 @@
 
     <footer>
         <p><a href="index.html">← Back to Main</a> | <a href="configuration.html">Configuration Reference</a></p>
-        <p>Bad IPs v3.5.3 - Silver Linings, LLC</p>
+        <p>Bad IPs v3.5.11 - Silver Linings, LLC</p>
     </footer>
 </body>
 </html>

@@ -3,7 +3,8 @@ set -e
 
 # ============================================================================
 # Bad IPs nftables Infrastructure Installer
-# Creates persistent nftables table, sets, chain, and rules for Bad IPs service
+# Creates nftables table, sets, chain, and rules for Bad IPs service
+# Idempotent: safe to run multiple times, only creates missing items
 # ============================================================================
 
 # Color codes
@@ -26,86 +27,122 @@ if ! command -v nft &> /dev/null; then
     exit 1
 fi
 
-# Ensure nftables.d directory exists
-mkdir -p /etc/nftables.d
+# Check jq
+if ! command -v jq &> /dev/null; then
+    echo -e "${RED}Error: jq is not installed${NC}"
+    echo "Install with: apt-get install jq"
+    exit 1
+fi
 
 echo "Creating Bad IPs nftables infrastructure..."
 
-# Write persistent nftables configuration to file
-cat > /etc/nftables.d/99-badips.nft << 'EOF'
-# Bad IPs nftables configuration
-# This file defines the table, sets, chain, and rules used for IP blocking
+# Get current ruleset as JSON
+RULESET=$(nft -j list ruleset 2>&1)
+if [ $? -ne 0 ]; then
+    echo -e "${RED}Error: Failed to query nftables${NC}"
+    echo "$RULESET"
+    exit 1
+fi
 
-table inet badips {
-    # IPv4 set for dynamically blocked IPs with automatic expiry
-    set badipv4 {
-        type ipv4_addr
-        flags interval, timeout
-        comment "Dynamically blocked IPv4 addresses"
-    }
-
-    # IPv6 set for dynamically blocked IPs with automatic expiry
-    set badipv6 {
-        type ipv6_addr
-        flags interval, timeout
-        comment "Dynamically blocked IPv6 addresses"
-    }
-
-    # IPv4 set for IPs that should never be blocked
-    set never_block {
-        type ipv4_addr
-        flags interval
-        comment "IPv4 addresses that should never be blocked"
-    }
-
-    # IPv6 set for IPs that should never be blocked
-    set never_block_v6 {
-        type ipv6_addr
-        flags interval
-        comment "IPv6 addresses that should never be blocked"
-    }
-
-    # IPv4 set for IPs that should always be blocked
-    set always_block {
-        type ipv4_addr
-        flags interval
-        comment "IPv4 addresses that should always be blocked"
-    }
-
-    # IPv6 set for IPs that should always be blocked
-    set always_block_v6 {
-        type ipv6_addr
-        flags interval
-        comment "IPv6 addresses that should always be blocked"
-    }
-
-    # Chain for blocking rules applied at prerouting hook
-    chain preroute_block {
-        type filter hook prerouting priority -150
-        policy accept
-        comment "Bad IPs blocking rules"
-
-        # Allow never-block list
-        ip saddr @never_block accept comment "IPv4 never-block exception"
-        ip6 saddr @never_block_v6 accept comment "IPv6 never-block exception"
-
-        # Block always-block list
-        ip saddr @always_block counter drop comment "IPv4 always-block enforcement"
-        ip6 saddr @always_block_v6 counter drop comment "IPv6 always-block enforcement"
-
-        # Block dynamically detected IPs
-        ip saddr @badipv4 counter drop comment "IPv4 dynamic block"
-        ip6 saddr @badipv6 counter drop comment "IPv6 dynamic block"
-    }
+# Function to check if table exists
+check_table_exists() {
+    echo "$RULESET" | jq -r '.nftables[] | select(.table != null) | select(.table.family == "inet") | select(.table.name == "badips") | .table.name' 2>/dev/null | grep -q "^badips$"
 }
-EOF
 
-# Load the configuration into running kernel
-nft -f /etc/nftables.d/99-badips.nft
+# Function to check if set exists
+check_set_exists() {
+    local set_name=$1
+    echo "$RULESET" | jq -r ".nftables[] | select(.set != null) | select(.set.family == \"inet\") | select(.set.table == \"badips\") | select(.set.name == \"$set_name\") | .set.name" 2>/dev/null | grep -q "^${set_name}$"
+}
 
-echo -e "${GREEN}✓ Bad IPs nftables infrastructure created successfully${NC}"
+# Function to check if chain exists
+check_chain_exists() {
+    echo "$RULESET" | jq -r '.nftables[] | select(.chain != null) | select(.chain.family == "inet") | select(.chain.table == "badips") | select(.chain.name == "preroute_block") | .chain.name' 2>/dev/null | grep -q "^preroute_block$"
+}
+
+# Function to count rules in chain
+count_chain_rules() {
+    echo "$RULESET" | jq '[.nftables[] | select(.rule != null) | select(.rule.family == "inet") | select(.rule.table == "badips") | select(.rule.chain == "preroute_block")] | length' 2>/dev/null
+}
+
+# 1. Create table if missing
+if ! check_table_exists; then
+    echo "  Creating table inet badips..."
+    nft add table inet badips
+else
+    echo "  ✓ Table inet badips already exists"
+fi
+
+# 2. Create sets if missing
+declare -A SETS=(
+    ["badipv4"]="type ipv4_addr; flags interval, timeout; comment \"Dynamically blocked IPv4\""
+    ["badipv6"]="type ipv6_addr; flags interval, timeout; comment \"Dynamically blocked IPv6\""
+    ["never_block"]="type ipv4_addr; flags interval; comment \"IPv4 never block\""
+    ["never_block_v6"]="type ipv6_addr; flags interval; comment \"IPv6 never block\""
+    ["always_block"]="type ipv4_addr; flags interval; comment \"IPv4 always block\""
+    ["always_block_v6"]="type ipv6_addr; flags interval; comment \"IPv6 always block\""
+)
+
+for set_name in "${!SETS[@]}"; do
+    if ! check_set_exists "$set_name"; then
+        echo "  Creating set $set_name..."
+        nft add set inet badips "$set_name" "{ ${SETS[$set_name]} }"
+    else
+        echo "  ✓ Set $set_name already exists"
+    fi
+done
+
+# 3. Create chain if missing
+if ! check_chain_exists; then
+    echo "  Creating chain preroute_block..."
+    nft add chain inet badips preroute_block '{ type filter hook prerouting priority -150; policy accept; }'
+else
+    echo "  ✓ Chain preroute_block already exists"
+fi
+
+# 4. Check and add rules (this is the tricky part)
+# We need to ensure exactly 6 rules exist, no duplicates
+RULE_COUNT=$(count_chain_rules)
+
+if [ "$RULE_COUNT" -eq 0 ]; then
+    echo "  Adding rules to preroute_block chain..."
+    nft add rule inet badips preroute_block ip saddr @never_block accept comment "IPv4 never-block exception"
+    nft add rule inet badips preroute_block ip6 saddr @never_block_v6 accept comment "IPv6 never-block exception"
+    nft add rule inet badips preroute_block ip saddr @always_block counter drop comment "IPv4 always-block enforcement"
+    nft add rule inet badips preroute_block ip6 saddr @always_block_v6 counter drop comment "IPv6 always-block enforcement"
+    nft add rule inet badips preroute_block ip saddr @badipv4 counter drop comment "IPv4 dynamic block"
+    nft add rule inet badips preroute_block ip6 saddr @badipv6 counter drop comment "IPv6 dynamic block"
+    echo "  ✓ Added 6 rules to chain"
+elif [ "$RULE_COUNT" -eq 6 ]; then
+    echo "  ✓ Chain already has 6 rules (correct)"
+elif [ "$RULE_COUNT" -gt 6 ]; then
+    echo -e "  ${YELLOW}⚠ Chain has $RULE_COUNT rules (expected 6)${NC}"
+    echo "  Rebuilding chain to remove duplicates..."
+    nft flush chain inet badips preroute_block
+    nft add rule inet badips preroute_block ip saddr @never_block accept comment "IPv4 never-block exception"
+    nft add rule inet badips preroute_block ip6 saddr @never_block_v6 accept comment "IPv6 never-block exception"
+    nft add rule inet badips preroute_block ip saddr @always_block counter drop comment "IPv4 always-block enforcement"
+    nft add rule inet badips preroute_block ip6 saddr @always_block_v6 counter drop comment "IPv6 always-block enforcement"
+    nft add rule inet badips preroute_block ip saddr @badipv4 counter drop comment "IPv4 dynamic block"
+    nft add rule inet badips preroute_block ip6 saddr @badipv6 counter drop comment "IPv6 dynamic block"
+    echo "  ✓ Rebuilt chain with 6 rules"
+else
+    echo -e "  ${YELLOW}⚠ Chain has $RULE_COUNT rules (expected 6)${NC}"
+    echo "  Adding missing rules..."
+    # In this case, just flush and recreate to be safe
+    nft flush chain inet badips preroute_block
+    nft add rule inet badips preroute_block ip saddr @never_block accept comment "IPv4 never-block exception"
+    nft add rule inet badips preroute_block ip6 saddr @never_block_v6 accept comment "IPv6 never-block exception"
+    nft add rule inet badips preroute_block ip saddr @always_block counter drop comment "IPv4 always-block enforcement"
+    nft add rule inet badips preroute_block ip6 saddr @always_block_v6 counter drop comment "IPv6 always-block enforcement"
+    nft add rule inet badips preroute_block ip saddr @badipv4 counter drop comment "IPv4 dynamic block"
+    nft add rule inet badips preroute_block ip6 saddr @badipv6 counter drop comment "IPv6 dynamic block"
+    echo "  ✓ Added all 6 rules"
+fi
+
 echo ""
-echo "Configuration saved to: /etc/nftables.d/99-badips.nft"
+echo -e "${GREEN}✓ Bad IPs nftables infrastructure ready${NC}"
+echo ""
 echo "You can now start the bad_ips service:"
 echo "  systemctl start bad_ips.service"
 exit 0
