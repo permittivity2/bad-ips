@@ -8,7 +8,7 @@ use Regexp::Common qw(net);  # Exports %RE{net}
 use Data::Dumper;
 use List::Util qw(any);
 use JSON qw(decode_json);
-our $VERSION = '3.5.11';
+our $VERSION = '3.5.12';
 
 my $log = get_logger();
 
@@ -109,6 +109,9 @@ sub run {
     my $lines = [];
     $lines = $self->_initial_fetch_lines();
     $self->{log}->info("Initial fetch found " . scalar(@$lines) . " relevant log lines");
+
+    # Process IPs from initial historical lines
+    $self->_add_ips_to_queue( lines => $lines );
 
     # While there is no shutdown signal or reload signal, continue monitoring
     while (1) {

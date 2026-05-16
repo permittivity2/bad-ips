@@ -173,12 +173,31 @@
             </p>
         </div>
 
+        <!-- Version 3.5.12 -->
+        <div class="version-card">
+            <div class="version-header">
+                <div>
+                    <span class="version-number">v3.5.12</span>
+                    <span class="badge badge-latest">LATEST</span>
+                </div>
+                <div class="version-date">May 16, 2026</div>
+            </div>
+
+            <div class="category">
+                <div class="category-title fixed">
+                    <span class="icon">🐛</span> Fixed
+                </div>
+                <ul>
+                    <li><strong>Historical Log Processing:</strong> Fixed critical bug where the GeneralLogMonitor plugin would fetch historical log lines on startup (e.g., 589 lines) but never process them to extract and block IPs. Only newly detected failures were being blocked. Now correctly calls <code>_add_ips_to_queue()</code> for initial fetched lines, ensuring all historical attacks are blocked on service startup.</li>
+                </ul>
+            </div>
+        </div>
+
         <!-- Version 3.5.11 -->
         <div class="version-card">
             <div class="version-header">
                 <div>
                     <span class="version-number">v3.5.11</span>
-                    <span class="badge badge-latest">LATEST</span>
                 </div>
                 <div class="version-date">May 15, 2026</div>
             </div>
@@ -525,7 +544,7 @@
 
     <footer>
         <p><a href="index.html">← Back to Main</a> | <a href="configuration.html">Configuration Reference</a></p>
-        <p>Bad IPs v3.5.11 - Silver Linings, LLC</p>
+        <p>Bad IPs v3.5.12 - Silver Linings, LLC</p>
     </footer>
 </body>
 </html>
