@@ -173,12 +173,50 @@
             </p>
         </div>
 
+        <!-- Version 3.5.4 -->
+        <div class="version-card">
+            <div class="version-header">
+                <div>
+                    <span class="version-number">v3.5.4</span>
+                    <span class="badge badge-latest">LATEST</span>
+                </div>
+                <div class="version-date">May 15, 2026</div>
+            </div>
+
+            <div class="category">
+                <div class="category-title changed">
+                    <span class="icon">✨</span> Changed
+                </div>
+                <ul>
+                    <li><strong>nftables Infrastructure:</strong> Replaced static file dependency (<code>/etc/nftables.d/99-badips.nft</code>) with dedicated installer script and runtime validation. The systemd service no longer requires the configuration file to exist at startup.</li>
+                </ul>
+            </div>
+
+            <div class="category">
+                <div class="category-title added">
+                    <span class="icon">➕</span> Added
+                </div>
+                <ul>
+                    <li><strong>Infrastructure Installer Script:</strong> New <code>/usr/local/sbin/bad_ips_installer.sh</code> creates required nftables table, sets, chain, and rules. Idempotent and safe to run multiple times.</li>
+                    <li><strong>Startup Validation:</strong> BadIPs service now validates all required nftables infrastructure exists on startup before starting worker threads. Clear error messages guide users to run installer if anything is missing.</li>
+                </ul>
+            </div>
+
+            <div class="category">
+                <div class="category-title fixed">
+                    <span class="icon">🐛</span> Fixed
+                </div>
+                <ul>
+                    <li><strong>Package Upgrade Issue:</strong> Service would fail to start after apt upgrade if <code>/etc/nftables.d/99-badips.nft</code> wasn't present. Now creates infrastructure automatically during installation and validates it at startup.</li>
+                </ul>
+            </div>
+        </div>
+
         <!-- Version 3.5.3 -->
         <div class="version-card">
             <div class="version-header">
                 <div>
                     <span class="version-number">v3.5.3</span>
-                    <span class="badge badge-latest">LATEST</span>
                 </div>
                 <div class="version-date">May 16, 2026</div>
             </div>
