@@ -140,6 +140,92 @@ else
     echo "  ✓ Added all 6 rules"
 fi
 
+# 5. Write persistent configuration file
+NFTABLES_D="/etc/nftables.d"
+BADIPS_NFT="$NFTABLES_D/99-badips.nft"
+
+echo ""
+echo "Writing persistent configuration to $BADIPS_NFT..."
+
+# Create directory if needed
+if [ ! -d "$NFTABLES_D" ]; then
+    mkdir -p "$NFTABLES_D"
+    echo "  Created $NFTABLES_D directory"
+fi
+
+# Write the nftables configuration file
+cat > "$BADIPS_NFT" << 'NFTCONFIG'
+#!/usr/sbin/nft -f
+# Bad IPs nftables infrastructure
+# This file is managed by bad_ips_installer.sh
+# Do not edit manually - changes will be overwritten
+
+table inet badips {
+    set badipv4 {
+        type ipv4_addr
+        flags interval, timeout
+        comment "Dynamically blocked IPv4 addresses"
+    }
+
+    set badipv6 {
+        type ipv6_addr
+        flags interval, timeout
+        comment "Dynamically blocked IPv6 addresses"
+    }
+
+    set never_block {
+        type ipv4_addr
+        flags interval
+        comment "IPv4 addresses that should never be blocked"
+    }
+
+    set never_block_v6 {
+        type ipv6_addr
+        flags interval
+        comment "IPv6 addresses that should never be blocked"
+    }
+
+    set always_block {
+        type ipv4_addr
+        flags interval
+        comment "IPv4 addresses that should always be blocked"
+    }
+
+    set always_block_v6 {
+        type ipv6_addr
+        flags interval
+        comment "IPv6 addresses that should always be blocked"
+    }
+
+    chain preroute_block {
+        type filter hook prerouting priority -150; policy accept;
+
+        ip saddr @never_block accept comment "IPv4 never-block exception"
+        ip6 saddr @never_block_v6 accept comment "IPv6 never-block exception"
+        ip saddr @always_block counter drop comment "IPv4 always-block enforcement"
+        ip6 saddr @always_block_v6 counter drop comment "IPv6 always-block enforcement"
+        ip saddr @badipv4 counter drop comment "IPv4 dynamic block"
+        ip6 saddr @badipv6 counter drop comment "IPv6 dynamic block"
+    }
+}
+NFTCONFIG
+
+chmod 644 "$BADIPS_NFT"
+echo "  ✓ Written $BADIPS_NFT"
+
+# Check if /etc/nftables.conf includes nftables.d
+NFTABLES_CONF="/etc/nftables.conf"
+if [ -f "$NFTABLES_CONF" ]; then
+    if ! grep -q 'include.*nftables\.d' "$NFTABLES_CONF" 2>/dev/null; then
+        echo ""
+        echo -e "${YELLOW}⚠ Note: $NFTABLES_CONF may not include files from $NFTABLES_D${NC}"
+        echo "  Add this line to $NFTABLES_CONF to load Bad IPs on boot:"
+        echo "    include \"$NFTABLES_D/*.nft\""
+    else
+        echo "  ✓ $NFTABLES_CONF already includes $NFTABLES_D"
+    fi
+fi
+
 echo ""
 echo -e "${GREEN}✓ Bad IPs nftables infrastructure ready${NC}"
 echo ""

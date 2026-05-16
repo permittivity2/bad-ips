@@ -28,7 +28,7 @@ $Data::Dumper::Indent   = 1;
 
 my $log = get_logger("BadIPs") || die "You MUST initialize Log::Log4perl before using BadIPs module";
 
-our $VERSION = '3.5.12';
+our $VERSION = '3.5.13';
 
 # -------------------------------------------------------------------------
 # Shared state for all threads
@@ -294,6 +294,19 @@ sub run {
         # 4) Heartbeat
         if (time() > $hb_at) {
             $hb_at = time() + ($self->{conf}->{heartbeat} // 60);
+
+            # Verify nftables infrastructure is still intact
+            eval {
+                $self->_verify_nftables_infrastructure();
+            };
+            if ($@) {
+                $log->error("nftables infrastructure check failed during heartbeat!");
+                $log->error("The nftables table, sets, or chain may have been removed.");
+                $log->error("To restore, run: sudo /usr/local/sbin/bad_ips_installer.sh");
+                $log->fatal("Exiting due to missing nftables infrastructure.");
+                exit(1);
+            }
+
             $self->heartbeat_info(
                 heartbeat_interval => $self->{conf}->{heartbeat},
                 new_since_hb       => \%new_since_hb,

@@ -8,7 +8,7 @@ use Regexp::Common qw(net);  # Exports %RE{net}
 use Data::Dumper;
 use List::Util qw(any);
 use JSON qw(decode_json);
-our $VERSION = '3.5.12';
+our $VERSION = '3.5.13';
 
 my $log = get_logger();
 
@@ -131,7 +131,12 @@ sub run {
         # Fetch new log lines since last check
         my $lines = [];
         $lines = $self->_recurring_fetch_lines();
-        $self->{log}->info("Fetched " . scalar(@$lines) . " new relevant log lines");
+        my $count = scalar(@$lines);
+        if ($count > 0) {
+            $self->{log}->info("Fetched $count new relevant log lines");
+        } else {
+            $self->{log}->debug("Fetched 0 new relevant log lines");
+        }
         # Enqueue IPs found in new log lines
         $self->_add_ips_to_queue( lines => $lines );
     }

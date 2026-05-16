@@ -173,12 +173,41 @@
             </p>
         </div>
 
+        <!-- Version 3.5.13 -->
+        <div class="version-card">
+            <div class="version-header">
+                <div>
+                    <span class="version-number">v3.5.13</span>
+                    <span class="badge badge-latest">LATEST</span>
+                </div>
+                <div class="version-date">May 16, 2026</div>
+            </div>
+
+            <div class="category">
+                <div class="category-title added">
+                    <span class="icon">✨</span> Added
+                </div>
+                <ul>
+                    <li><strong>nftables Persistence:</strong> Installer now writes persistent configuration to <code>/etc/nftables.d/99-badips.nft</code> so infrastructure survives reboots. Previously only created in-memory rules.</li>
+                    <li><strong>nftables Watchdog:</strong> Service now verifies nftables infrastructure during each heartbeat (every 60 seconds). If the table, sets, or chain are missing, the service logs clear instructions and exits so systemd can alert administrators.</li>
+                </ul>
+            </div>
+
+            <div class="category">
+                <div class="category-title changed">
+                    <span class="icon">🔄</span> Changed
+                </div>
+                <ul>
+                    <li><strong>Reduced Log Noise:</strong> "Fetched 0 new relevant log lines" messages changed from INFO to DEBUG level, reducing log spam when no attacks are occurring.</li>
+                </ul>
+            </div>
+        </div>
+
         <!-- Version 3.5.12 -->
         <div class="version-card">
             <div class="version-header">
                 <div>
                     <span class="version-number">v3.5.12</span>
-                    <span class="badge badge-latest">LATEST</span>
                 </div>
                 <div class="version-date">May 16, 2026</div>
             </div>
@@ -544,7 +573,7 @@
 
     <footer>
         <p><a href="index.html">← Back to Main</a> | <a href="configuration.html">Configuration Reference</a></p>
-        <p>Bad IPs v3.5.12 - Silver Linings, LLC</p>
+        <p>Bad IPs v3.5.13 - Silver Linings, LLC</p>
     </footer>
 </body>
 </html>
