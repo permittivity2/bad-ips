@@ -62,7 +62,7 @@ sub new {
     }
     $self->{patterns} = \%patterns;
 
-    my %files_to_monitor = map { $_ => 1 } @{ $self->{log_paths} };
+    my %files_to_monitor = map { $_ => 1 } @{ $self->{file_paths} };
     $self->{files_to_monitor} = \%files_to_monitor;
 
     bless $self, $class;
@@ -268,7 +268,7 @@ Returns:
 =cut
 sub _read_log_files {
     my ($self, %args) = @_;
-    my $file_paths = $args{file_paths} || $self->{log_paths} || [];
+    my $file_paths = $args{file_paths} || $self->{file_paths} || [];
     my @all_lines = ();
 
     for my $file_path (@$file_paths) {
