@@ -1783,6 +1783,10 @@ sub _start_plugins {
                 log               => get_logger($class),
             );
         };
+        if ($@) {
+            $log->error("Failed to instantiate plugin $plugin: $@");
+            next;
+        }
         if (!$obj || !$obj->can('run')) {
             $log->error("Plugin $plugin is invalid or missing run()");
             next;
