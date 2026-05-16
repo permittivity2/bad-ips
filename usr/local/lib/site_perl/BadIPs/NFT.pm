@@ -5,7 +5,7 @@ use warnings;
 use JSON;
 use Log::Log4perl qw(get_logger);
 
-our $VERSION = '3.5.4';
+our $VERSION = '3.5.5';
 
 my $log = get_logger("BadIPs::NFT");
 
