@@ -8,7 +8,7 @@ use Regexp::Common qw(net);  # Exports %RE{net}
 use File::Path qw(make_path);
 use Digest::MD5 qw(md5_hex);
 use Data::Dumper;
-our $VERSION = '3.5.13';
+our $VERSION = '3.5.14';
 my $log = get_logger("BadIPs::Plugins::Spamhaus");
 
 =head1 NAME
@@ -66,7 +66,10 @@ sub run {
     my $log = $self->{log};
 
     my $urls = $conf->{Plugins}->{Spamhaus}->{urls} || [];
-    $urls = [ $urls ] if ref($urls) ne 'ARRAY';
+    # Handle comma-separated URL string from config file
+    if (ref($urls) ne 'ARRAY') {
+        $urls = [ split(/\s*,\s*/, $urls) ];
+    }
 
     my $interval   = $conf->{Plugins}->{Spamhaus}->{fetch_interval} || 3600;
     my $use_cache  = defined $conf->{Plugins}->{Spamhaus}->{use_cache}

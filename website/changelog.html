@@ -173,12 +173,31 @@
             </p>
         </div>
 
+        <!-- Version 3.5.14 -->
+        <div class="version-card">
+            <div class="version-header">
+                <div>
+                    <span class="version-number">v3.5.14</span>
+                    <span class="badge badge-latest">LATEST</span>
+                </div>
+                <div class="version-date">May 16, 2026</div>
+            </div>
+
+            <div class="category">
+                <div class="category-title fixed">
+                    <span class="icon">🐛</span> Fixed
+                </div>
+                <ul>
+                    <li><strong>Spamhaus Plugin URL Parsing:</strong> Fixed bug where comma-separated URLs in configuration (e.g., <code>urls = url1, url2</code>) were treated as a single concatenated URL instead of separate URLs. The plugin now correctly splits and fetches each URL individually.</li>
+                </ul>
+            </div>
+        </div>
+
         <!-- Version 3.5.13 -->
         <div class="version-card">
             <div class="version-header">
                 <div>
                     <span class="version-number">v3.5.13</span>
-                    <span class="badge badge-latest">LATEST</span>
                 </div>
                 <div class="version-date">May 16, 2026</div>
             </div>
@@ -573,7 +592,7 @@
 
     <footer>
         <p><a href="index.html">← Back to Main</a> | <a href="configuration.html">Configuration Reference</a></p>
-        <p>Bad IPs v3.5.13 - Silver Linings, LLC</p>
+        <p>Bad IPs v3.5.14 - Silver Linings, LLC</p>
     </footer>
 </body>
 </html>
