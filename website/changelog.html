@@ -173,12 +173,31 @@
             </p>
         </div>
 
+        <!-- Version 3.5.3 -->
+        <div class="version-card">
+            <div class="version-header">
+                <div>
+                    <span class="version-number">v3.5.3</span>
+                    <span class="badge badge-latest">LATEST</span>
+                </div>
+                <div class="version-date">May 16, 2026</div>
+            </div>
+
+            <div class="category">
+                <div class="category-title fixed">
+                    <span class="icon">🐛</span> Fixed
+                </div>
+                <ul>
+                    <li><strong>IP Blocking Queue Handler:</strong> Fixed critical bug in <code>enqueue_ip</code> callbacks that prevented any IPs from being added to nftables sets. The callbacks were enqueuing list arguments instead of hash references, causing worker threads to crash with "Can't use string as HASH ref" error. This affected both PublicBlocklistPlugins and regular Plugins, preventing all IP blocking from working.</li>
+                </ul>
+            </div>
+        </div>
+
         <!-- Version 3.5.2 -->
         <div class="version-card">
             <div class="version-header">
                 <div>
                     <span class="version-number">v3.5.2</span>
-                    <span class="badge badge-latest">LATEST</span>
                 </div>
                 <div class="version-date">May 15, 2026</div>
             </div>
@@ -310,7 +329,7 @@
 
     <footer>
         <p><a href="index.html">← Back to Main</a> | <a href="configuration.html">Configuration Reference</a></p>
-        <p>Bad IPs v3.5.2 - Silver Linings, LLC</p>
+        <p>Bad IPs v3.5.3 - Silver Linings, LLC</p>
     </footer>
 </body>
 </html>
