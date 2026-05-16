@@ -28,7 +28,7 @@ $Data::Dumper::Indent   = 1;
 
 my $log = get_logger("BadIPs") || die "You MUST initialize Log::Log4perl before using BadIPs module";
 
-our $VERSION = '3.5.3';
+our $VERSION = '3.5.2';
 
 # -------------------------------------------------------------------------
 # Shared state for all threads
@@ -1568,8 +1568,8 @@ sub _start_publicblocklist_plugins {
             shutdown_check    => \&_get_shutdown_flag,
             is_never_block_ip => \&_is_never_block_ip,
             enqueue_ip        => sub {
-                my ($ip_item) = @_;
-                $ips_to_block_queue->enqueue($ip_item);
+                my (%args) = @_;
+                $ips_to_block_queue->enqueue(\%args);
             },
             log => get_logger($class),  # optional, but nice
         );
@@ -1642,7 +1642,10 @@ sub _start_plugins {
         my $obj = eval {
             $class->new(
                 conf              => $conf,
-                enqueue_ip        => sub { $ips_to_block_queue->enqueue(@_) },
+                enqueue_ip        => sub {
+                    my (%args) = @_;
+                    $ips_to_block_queue->enqueue(\%args);
+                },
                 shutdown_check    => \&_get_shutdown_flag,
                 reload_check      => \&_get_reload_flag,
                 is_never_block_ip => \&_is_never_block_ip,
