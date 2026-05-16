@@ -35,8 +35,15 @@ sub new {
 
     my $plugin_confs = $self->{conf}->get_block( section => $self->{plugin_section} );
     $self->{monitor_method} = $plugin_confs->{monitor_method} || 'auto';
-    $self->{units} = $plugin_confs->{units} || [];
-    $self->{file_paths} = $plugin_confs->{log_paths} || [];
+
+    # Parse journal units (comma-separated list)
+    my $units = $plugin_confs->{journal_unit} || '';
+    $self->{units} = $units ? [ split(/\s*,\s*/, $units) ] : [];
+
+    # Parse file paths (comma-separated list)
+    my $log_paths = $plugin_confs->{log_paths} || '';
+    $self->{file_paths} = $log_paths ? [ split(/\s*,\s*/, $log_paths) ] : [];
+
     $self->{initial_fetch} = $plugin_confs->{initial_fetch} || 300;
     $self->{fetch_interval} = $plugin_confs->{fetch_interval} || 60;
     $self->{file_positions} = {};
