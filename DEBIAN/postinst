@@ -201,15 +201,9 @@ cat > /etc/sudoers.d/bad_ips <<SUDOEOF
 # Created by bad-ips package installation
 # DO NOT EDIT - Changes will be overwritten on package upgrade
 
-# Command aliases for allowed nft operations
-Cmnd_Alias NFT_BADIPS_ADD = /usr/sbin/nft add element inet badips * *
-Cmnd_Alias NFT_BADIPS_FLUSH = /usr/sbin/nft flush set inet badips never_block*, \\
-                              /usr/sbin/nft flush set inet badips always_block*
-Cmnd_Alias NFT_BADIPS_LIST = /usr/sbin/nft -j list ruleset, \\
-                             /usr/sbin/nft list ruleset
-
-# Allow $BADIPS_USER user to run these commands without password
-$BADIPS_USER ALL=(root) NOPASSWD: NFT_BADIPS_ADD, NFT_BADIPS_FLUSH, NFT_BADIPS_LIST
+# Allow $BADIPS_USER user to run nft commands for the badips table
+# Note: Wildcards must be at the end of command specifications in sudoers
+$BADIPS_USER ALL=(root) NOPASSWD: /usr/sbin/nft add element inet badips *, /usr/sbin/nft flush set inet badips *, /usr/sbin/nft -j list ruleset, /usr/sbin/nft list ruleset
 SUDOEOF
 
 # Set correct permissions on sudoers file

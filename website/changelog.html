@@ -173,12 +173,31 @@
             </p>
         </div>
 
+        <!-- Version 3.5.15 -->
+        <div class="version-card">
+            <div class="version-header">
+                <div>
+                    <span class="version-number">v3.5.15</span>
+                    <span class="badge badge-latest">LATEST</span>
+                </div>
+                <div class="version-date">May 30, 2026</div>
+            </div>
+
+            <div class="category">
+                <div class="category-title fixed">
+                    <span class="icon">🐛</span> Fixed
+                </div>
+                <ul>
+                    <li><strong>CRITICAL - Sudoers Syntax:</strong> Fixed package installation failure caused by invalid sudoers configuration. The postinst script was generating <code>/etc/sudoers.d/bad_ips</code> with command aliases that used wildcards in arguments (e.g., <code>Cmnd_Alias NFT_BADIPS_ADD = /usr/sbin/nft add element inet badips * *</code>), which sudoers does not support. This caused <code>visudo -c</code> validation to fail with "wildcards are not allowed in command arguments", preventing package configuration and blocking <code>apt dist-upgrade</code>. The sudoers rule has been simplified to use a direct permission grant with wildcards only at the end: <code>badips ALL=(root) NOPASSWD: /usr/sbin/nft add element inet badips *, /usr/sbin/nft flush set inet badips *, ...</code> This syntax is validated successfully and provides the same functionality.</li>
+                </ul>
+            </div>
+        </div>
+
         <!-- Version 3.5.14 -->
         <div class="version-card">
             <div class="version-header">
                 <div>
                     <span class="version-number">v3.5.14</span>
-                    <span class="badge badge-latest">LATEST</span>
                 </div>
                 <div class="version-date">May 16, 2026</div>
             </div>

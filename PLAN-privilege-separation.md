@@ -188,16 +188,10 @@ cat > /etc/sudoers.d/bad_ips <<SUDOEOF
 # Allows $BADIPS_USER user to manage the inet badips nftables table
 # Created by bad-ips package installation
 
-# Command aliases for allowed nft operations
-Cmnd_Alias NFT_BADIPS_ADD = /usr/sbin/nft add element inet badips badipv4 *
-Cmnd_Alias NFT_BADIPS_ADD_V6 = /usr/sbin/nft add element inet badips badipv6 *
-Cmnd_Alias NFT_BADIPS_FLUSH = /usr/sbin/nft flush set inet badips never_block*, \\
-                              /usr/sbin/nft flush set inet badips always_block*
-Cmnd_Alias NFT_BADIPS_LIST = /usr/sbin/nft -j list ruleset, \\
-                             /usr/sbin/nft list ruleset
-
-# Allow $BADIPS_USER user to run these commands without password
-$BADIPS_USER ALL=(root) NOPASSWD: NFT_BADIPS_ADD, NFT_BADIPS_ADD_V6, NFT_BADIPS_FLUSH, NFT_BADIPS_LIST
+# Allow $BADIPS_USER user to run nft commands for the badips table
+# Note: Wildcards must be at the end of command specifications in sudoers
+# Command aliases with wildcards in arguments are not supported by sudoers
+$BADIPS_USER ALL=(root) NOPASSWD: /usr/sbin/nft add element inet badips *, /usr/sbin/nft flush set inet badips *, /usr/sbin/nft -j list ruleset, /usr/sbin/nft list ruleset
 SUDOEOF
 
 # Set correct permissions
@@ -215,8 +209,9 @@ echo "Sudoers configuration created and validated"
 ```
 
 **Rationale:**
-- Command aliases improve readability and maintainability
-- Wildcard `*` allows arguments but restricts to specific table/set
+- Wildcards must be at the end of command specifications in sudoers syntax
+- Command aliases with wildcards in arguments are not supported and will cause validation errors
+- The wildcard `*` at the end allows the daemon to run nft commands with any arguments for the badips table
 - `NOPASSWD` required since service accounts can't enter passwords
 - Limited to read (list) and write (add element, flush set) on inet badips table only
 - Cannot modify other tables or create/destroy tables
