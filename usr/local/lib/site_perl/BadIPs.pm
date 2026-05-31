@@ -28,7 +28,7 @@ $Data::Dumper::Indent   = 1;
 
 my $log = get_logger("BadIPs") || die "You MUST initialize Log::Log4perl before using BadIPs module";
 
-our $VERSION = '3.5.17';
+our $VERSION = '3.5.18';
 
 # -------------------------------------------------------------------------
 # Shared state for all threads
@@ -1066,6 +1066,7 @@ sub _shutdown_and_join_workers {
                     $log->error("Thread $name join died: $@");
                 } else {
                     $log->info("Worker thread $name joined successfully");
+                    $wt->{thread} = undef;  # Mark as joined, prevent re-processing
                 }
             } else {
                 $all_joined = 0;
@@ -1144,6 +1145,7 @@ sub _handle_reload_request {
                     $log->error("Thread $name join died: $@");
                 } else {
                     $log->info("Worker thread $name joined successfully");
+                    $wt->{thread} = undef;  # Mark as joined, prevent re-processing
                 }
             } else {
                 $all_joined = 0;

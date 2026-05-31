@@ -173,12 +173,32 @@
             </p>
         </div>
 
+        <!-- Version 3.5.18 -->
+        <div class="version-card">
+            <div class="version-header">
+                <div>
+                    <span class="version-number">v3.5.18</span>
+                    <span class="badge badge-latest">LATEST</span>
+                </div>
+                <div class="version-date">May 30, 2026</div>
+            </div>
+
+            <div class="category">
+                <div class="category-title fixed">
+                    <span class="icon">🐛</span> Fixed
+                </div>
+                <ul>
+                    <li><strong>Critical - Thread Joining Bug:</strong> Fixed fatal error during shutdown where already-joined threads would be incorrectly flagged as stuck and attempt to detach, causing "Cannot detach a joined thread" error and service crash. Thread references are now properly nulled after successful join to prevent re-processing.</li>
+                    <li><strong>Reload Stability:</strong> Applied same thread tracking fix to reload handler to prevent similar errors during in-process reloads.</li>
+                </ul>
+            </div>
+        </div>
+
         <!-- Version 3.5.17 -->
         <div class="version-card">
             <div class="version-header">
                 <div>
                     <span class="version-number">v3.5.17</span>
-                    <span class="badge badge-latest">LATEST</span>
                 </div>
                 <div class="version-date">May 30, 2026</div>
             </div>
