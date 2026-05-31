@@ -28,7 +28,7 @@ $Data::Dumper::Indent   = 1;
 
 my $log = get_logger("BadIPs") || die "You MUST initialize Log::Log4perl before using BadIPs module";
 
-our $VERSION = '3.5.16';
+our $VERSION = '3.5.17';
 
 # -------------------------------------------------------------------------
 # Shared state for all threads
@@ -761,7 +761,7 @@ sub _load_config {
     $accum{pull_max_interval}                      //= 180;
     $accum{failover_log}                           //= '/var/lib/bad_ips/failover.log';
     $accum{failover_enabled}                       //= 1;
-    $accum{graceful_shutdown_timeout}              //= 300;
+    $accum{graceful_shutdown_timeout}              //= 15;
 
     # PostgreSQL configuration
     $accum{db_type}     //= 'postgres';
@@ -1348,9 +1348,9 @@ sub _worker_nft_blocker {
 
     $log->info("nft_blocker_thread started (table=$fam, family_table=$tab, set=$set, ttl=$ttl)");
 
-    while (!_get_shutdown_flag() && !_get_reload_flag()) {
+    while (1) {
         my $item = $ips_to_block_queue->dequeue();
-        last if ( ! defined $item );  # Probably queue has ended and _get_shutdown_flag() or _get_reload_flag() is set
+        last if ( ! defined $item );  # Queue has ended
 
         next if _should_skip_ip(%args, item => $item, blocked => \%blocked_in_thread, conf => $conf);
 
@@ -1529,7 +1529,7 @@ sub _worker_central_db_sync {
 
     $log->info("central_db_sync_thread started (batch_size=$batch_size)");
 
-    while (!_get_shutdown_flag() && !_get_reload_flag()) {
+    while (1) {
         my $item = $sync_to_central_db_queue->dequeue();
 
         # if item is undef, then the queue is ended; exit thread
@@ -1540,9 +1540,16 @@ sub _worker_central_db_sync {
 
         my @batch = ($item);
         my $batch_start = time();
-        while ( (@batch < $batch_size) && (time() - $batch_start < $batch_timeout) ) {
+        my $drain_mode = 0;
+
+        while ( (@batch < $batch_size) && (time() - $batch_start < $batch_timeout) && !$drain_mode ) {
             my $next = $sync_to_central_db_queue->dequeue_nb();
-            push @batch, $next if defined $next;
+            if (defined $next) {
+                push @batch, $next;
+            } elsif ($sync_to_central_db_queue->pending() == 0) {
+                # Queue is draining (ended and nearly empty)
+                $drain_mode = 1;
+            }
         }
 
         eval {
