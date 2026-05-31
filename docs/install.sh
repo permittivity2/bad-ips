@@ -74,7 +74,7 @@ add_gpg_key() {
     echo -e "${BLUE}Adding Silver Linings, LLC GPG key...${NC}"
 
     # Download and add GPG key
-    curl -fsSL https://projects.thedude.vip/apt/silver-linings.gpg.key | gpg --dearmor -o /etc/apt/trusted.gpg.d/silver-linings.gpg
+    curl -fsSL http://projects.thedude.vip/apt/silver-linings.gpg.key | gpg --dearmor -o /etc/apt/trusted.gpg.d/silver-linings.gpg
 
     echo -e "${GREEN}✓${NC} GPG key added"
 }
@@ -84,7 +84,7 @@ add_repository() {
     echo -e "${BLUE}Adding Bad IPs apt repository...${NC}"
 
     # Add signed repository
-    echo "deb [signed-by=/etc/apt/trusted.gpg.d/silver-linings.gpg] https://projects.thedude.vip/apt/ ./" > /etc/apt/sources.list.d/badips.list
+    echo "deb [signed-by=/etc/apt/trusted.gpg.d/silver-linings.gpg] http://projects.thedude.vip/apt/ ./" > /etc/apt/sources.list.d/badips.list
 
     echo -e "${GREEN}✓${NC} Repository added"
 }

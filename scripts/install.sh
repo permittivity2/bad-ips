@@ -64,7 +64,7 @@ add_repository() {
     echo -e "${BLUE}Adding Bad IPs apt repository...${NC}"
 
     # Add repository (without GPG for now - ALPHA version)
-    echo "deb [trusted=yes] https://projects.thedude.vip/apt/ ./" > /etc/apt/sources.list.d/badips.list
+    echo "deb [trusted=yes] http://projects.thedude.vip/apt/ ./" > /etc/apt/sources.list.d/badips.list
 
     echo -e "${GREEN}✓${NC} Repository added"
 }

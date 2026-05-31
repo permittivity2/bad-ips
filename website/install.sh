@@ -16,8 +16,8 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 
 # Repository configuration
-REPO_URL="https://projects.thedude.vip/apt"
-GPG_KEY_URL="https://projects.thedude.vip/apt/silver-linings.gpg.key"
+REPO_URL="http://projects.thedude.vip/apt"
+GPG_KEY_URL="http://projects.thedude.vip/apt/silver-linings.gpg.key"
 
 # Configuration paths
 CONFIG_DIR="/usr/local/etc"
