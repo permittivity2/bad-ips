@@ -33,5 +33,6 @@ debian/bad-ips/
 Thumbs.db
 build/
 
-# Local project instructions (sensitive infrastructure info)
+# Local project instructions and deployment scripts (sensitive infrastructure info)
 CLAUDE.md
+build-package.sh
