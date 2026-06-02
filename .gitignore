@@ -32,3 +32,6 @@ debian/bad-ips/
 .DS_Store
 Thumbs.db
 build/
+
+# Local project instructions (sensitive infrastructure info)
+CLAUDE.md
