@@ -173,12 +173,31 @@
             </p>
         </div>
 
+        <!-- Version 3.5.20 -->
+        <div class="version-card">
+            <div class="version-header">
+                <div>
+                    <span class="version-number">v3.5.20</span>
+                    <span class="badge badge-latest">LATEST</span>
+                </div>
+                <div class="version-date">June 2, 2026</div>
+            </div>
+
+            <div class="category">
+                <div class="category-title fixed">
+                    <span class="icon">🐛</span> Fixed
+                </div>
+                <ul>
+                    <li><strong>CRITICAL - nftables Installer Syntax Error:</strong> Fixed installer script that was failing with "syntax error, unexpected '}'" when creating nftables sets. The <code>nft add set</code> CLI syntax does not support inline comment parameters. Refactored to write persistent configuration file first, then load it with <code>nft -f</code> to create all infrastructure (table, sets, chain, rules) atomically. This approach ensures consistent behavior across all nftables versions.</li>
+                </ul>
+            </div>
+        </div>
+
         <!-- Version 3.5.19 -->
         <div class="version-card">
             <div class="version-header">
                 <div>
                     <span class="version-number">v3.5.19</span>
-                    <span class="badge badge-latest">LATEST</span>
                 </div>
                 <div class="version-date">June 2, 2026</div>
             </div>
