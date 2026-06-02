@@ -173,12 +173,31 @@
             </p>
         </div>
 
+        <!-- Version 3.5.19 -->
+        <div class="version-card">
+            <div class="version-header">
+                <div>
+                    <span class="version-number">v3.5.19</span>
+                    <span class="badge badge-latest">LATEST</span>
+                </div>
+                <div class="version-date">June 2, 2026</div>
+            </div>
+
+            <div class="category">
+                <div class="category-title fixed">
+                    <span class="icon">🐛</span> Fixed
+                </div>
+                <ul>
+                    <li><strong>Package Repository Integrity:</strong> Rebuilt version to bypass corrupted cached package in apt-cacher-ng proxy. Previous v3.5.18 package had file size mismatch in cache (50286 != 50280 bytes) preventing installation on some servers. New build creates fresh package with no cache history.</li>
+                </ul>
+            </div>
+        </div>
+
         <!-- Version 3.5.18 -->
         <div class="version-card">
             <div class="version-header">
                 <div>
                     <span class="version-number">v3.5.18</span>
-                    <span class="badge badge-latest">LATEST</span>
                 </div>
                 <div class="version-date">May 30, 2026</div>
             </div>
@@ -247,7 +266,6 @@
             <div class="version-header">
                 <div>
                     <span class="version-number">v3.5.15</span>
-                    <span class="badge badge-latest">LATEST</span>
                 </div>
                 <div class="version-date">May 30, 2026</div>
             </div>
