@@ -1368,7 +1368,8 @@ sub _worker_nft_blocker {
         $log->debug("Trying to block item: " . Dumper($item));
 
         # Verify required fields are clean before attempting block
-        unless (defined $item->{ip} && $item->{ip} =~ /^[\da-fA-F:.]+$/) {
+        # ip needs to allow digits, dots, colons (for IPv6), and letters a-f for hex in IPv6 and a slash for CIDR notation
+        unless (defined $item->{ip} && $item->{ip} =~ /^[\da-fA-F.:\/]+$/) {
             $log->debug("Invalid IP format, skipping item: " . Dumper($item));
             next;
         }
