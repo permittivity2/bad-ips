@@ -173,12 +173,43 @@
             </p>
         </div>
 
+        <!-- Version 3.5.22 -->
+        <div class="version-card">
+            <div class="version-header">
+                <div>
+                    <span class="version-number">v3.5.22</span>
+                    <span class="badge badge-latest">LATEST</span>
+                </div>
+                <div class="version-date">June 5, 2026</div>
+            </div>
+
+            <div class="category">
+                <div class="category-title changed">
+                    <span class="icon">🔄</span> Changed
+                </div>
+                <ul>
+                    <li><strong>Database Resilience Refactoring:</strong> Completely refactored both <code>central_db_sync</code> and <code>pull_global_blocks</code> worker threads for improved robustness. Extracted common reconnection logic into <code>_attempt_db_reconnect()</code> helper function with interruptible 1-second sleep loops to allow shutdown signal response. Replaced blocking sleep operations with 1-second loop patterns that check shutdown/reload flags, enabling responsive service stops and configuration reloads.</li>
+                    <li><strong>Periodic Health Checks:</strong> Added automatic database connection health verification every 60 seconds using <code>$db->test_connection()</code>. Stale connections are immediately detected and cleared (<code>$dbh = undef</code>) to force fresh reconnection on next operation.</li>
+                    <li><strong>Improved Queue Handling:</strong> Extracted queue operation logic into <code>_try_enqueue_with_overflow_handling()</code> helper function with optional non-blocking mode for safely adding IPs when queue depth exceeds 1000 items (prevents nft_blocker thread stall if database outage persists).</li>
+                    <li><strong>Separate Retry Strategies:</strong> Reconnection retries are now independent from operation retries. Failed operations include separate reconnection attempt loop before eventual requeue, rather than conflating the two concerns.</li>
+                </ul>
+            </div>
+
+            <div class="category">
+                <div class="category-title added">
+                    <span class="icon">✨</span> Added
+                </div>
+                <ul>
+                    <li><strong>Website Documentation:</strong> Comprehensive documentation of database resilience parameters in configuration guide with parameter table, trade-off explanations, and example calculations for exponential backoff behavior.</li>
+                </ul>
+            </div>
+        </div>
+
         <!-- Version 3.5.21 -->
         <div class="version-card">
             <div class="version-header">
                 <div>
                     <span class="version-number">v3.5.21</span>
-                    <span class="badge badge-latest">LATEST</span>
                 </div>
                 <div class="version-date">June 6, 2026</div>
             </div>
