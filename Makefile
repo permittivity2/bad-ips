@@ -22,9 +22,11 @@ clean:
 	@echo "Cleaned build artifacts"
 
 deb:
-	@echo "Building $(DEB_NAME) using dpkg-buildpackage..."
+	@echo "Building $(DEB_NAME)..."
 	@echo ""
-	dpkg-buildpackage -b -us -uc
+	fakeroot debian/rules clean
+	fakeroot debian/rules binary
+	@echo ""
 	@echo ""
 	@echo "==================================================================="
 	@echo "SUCCESS: Built $(DEB_NAME)"
