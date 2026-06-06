@@ -98,6 +98,24 @@ to configure PostgreSQL connection:
 .B db_ssl_mode
 = SSL mode (disable, require, verify-ca, verify-full)
 .RE
+.SS Database Resilience Configuration
+Optional settings in
+.I /usr/local/etc/badips.conf
+to tune reconnection behavior during database outages:
+.PP
+.RS
+.B [global]
+.br
+.B db_retry_interval
+= seconds between reconnection attempts (default: 3)
+.br
+Specifies the base delay for exponential backoff. Worker threads wait this many seconds before the first reconnection attempt, then use exponential backoff for subsequent attempts (3s, 6s, 9s, etc.). Lower values provide faster recovery for brief outages but increase database load. Higher values reduce load but increase time to recover.
+.br
+.B db_max_retries
+= maximum number of reconnection attempts (default: 5)
+.br
+When a database operation fails, the system attempts to reconnect up to this many times before requeueing the operation. Each attempt includes a backoff delay. After exhausting retries, the operation is requeued and the thread continues operating (local IP blocking continues uninterrupted). Increase this value for unreliable networks or slow database startup, decrease for faster failure detection.
+.RE
 .SS Detector Configuration
 Create detector files in
 .I /usr/local/etc/badips.d/
