@@ -51,11 +51,14 @@ sub new {
         plugin_section => $args{plugin_section} || '',
     };
 
-    # Extract plugin configuration from nested hash
+    # Extract plugin configuration from config hash
+    # BadIPs.pm restructures the config before passing to plugins:
+    # conf => { Plugins => { Postfix => { ... }, ... }, ... }
     my $plugin_confs = {};
     if ($self->{plugin_section} && $self->{plugin_section} =~ /^Plugins:(.+)$/) {
         my $plugin_name = $1;
-        $plugin_confs = $self->{conf}->{Plugins}->{$plugin_name} || {};
+        my $plugins_hash = $self->{conf}->{Plugins} || {};
+        $plugin_confs = $plugins_hash->{$plugin_name} || {};
     }
 
     # Journal monitoring settings
@@ -126,6 +129,8 @@ sub new {
     # Verify patterns are configured
     if (!%patterns_by_category) {
         $self->{log}->warn("No patterns configured for Postfix plugin; plugin will be inactive");
+    } else {
+        $self->{log}->info("Postfix plugin loaded " . scalar(keys %patterns_by_category) . " pattern categories");
     }
 
     bless $self, $class;
