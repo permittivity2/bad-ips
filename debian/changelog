@@ -1,0 +1,20 @@
+bad-ips (3.5.24) unstable; urgency=medium
+
+  * Fix: Remove non-existent log4perl.conf from conffiles
+  * Fix: Remove inline comments from Postfix config to prevent Config::Tiny parsing issues
+  * Clean up debug logging in Postfix plugin
+  * Enhance: Add input validation and debugging to nft_blocker worker
+  * Security: Add format validation for IP addresses and TTL values
+  * Postfix plugin initial fetch window increased from 300s to 3600s
+
+ -- Gardner <gardner@homelab>  Fri, 06 Jun 2026 15:54:00 +0000
+
+bad-ips (3.5.23) unstable; urgency=medium
+
+  * Add Postfix Plugin for Distributed Attack Detection
+  * Username-Based SASL Failure Tracking
+  * Protocol Violation Immediate Blocking
+  * Escalating Block Duration System
+  * TTL Parameter Support for custom per-IP block durations
+
+ -- Gardner <gardner@homelab>  Thu, 06 Jun 2026 12:00:00 +0000

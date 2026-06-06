@@ -1,0 +1,26 @@
+Source: bad-ips
+Section: admin
+Priority: optional
+Maintainer: Gardner <gardner@homelab>
+Homepage: https://github.com/permittivity2/bad-ips
+Standards-Version: 4.6.0
+
+Package: bad-ips
+Architecture: all
+Depends: perl, nftables, jq, postgresql-client, libconfig-tiny-perl, libdbi-perl, libdbd-pg-perl, libjson-perl, libnet-cidr-perl, liblog-log4perl-perl, libfile-readbackwards-perl, libfile-slurp-perl, libregexp-common-perl, libwww-perl
+Description: Distributed IP blocking system with centralized database (ALPHA)
+ Bad IPs monitors system logs for malicious activity and automatically blocks
+ offending IP addresses using nftables. Features centralized PostgreSQL database
+ for correlation across multiple servers.
+ .
+ ALPHA STATUS: This software is currently in alpha testing. While actively
+ tested on live production servers, use with appropriate caution.
+ .
+ Features:
+  - Real-time log monitoring with systemd journal integration
+  - Multi-threaded async architecture with queue-based pipeline
+  - Centralized PostgreSQL database for cross-server correlation
+  - Configurable per-service attack pattern detection
+  - Never-block CIDR filtering for trusted networks
+  - Automatic expiration and cleanup of stale blocks
+  - Fast local blocking with <1ms response time

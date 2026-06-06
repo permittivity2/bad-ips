@@ -1,0 +1,88 @@
+#!/usr/bin/make -f
+
+# Debian package build rules for bad-ips
+# Minimal rules without debhelper dependency
+
+PACKAGE=bad-ips
+INSTALL_ROOT=debian/$(PACKAGE)
+VERSION=$(shell grep '^bad-ips' debian/changelog | head -1 | sed 's/.*(\(.*\)).*/\1/')
+
+build:
+	# Nothing to build - pure Perl application
+
+clean:
+	rm -rf $(INSTALL_ROOT)
+	rm -f debian/*.debhelper
+	rm -f debian/substvars
+	rm -f debian/files
+	rm -rf debian/.debhelper
+
+binary-indep: build
+	# Create directory structure
+	mkdir -p $(INSTALL_ROOT)/usr/local/sbin
+	mkdir -p $(INSTALL_ROOT)/usr/local/lib/site_perl
+	mkdir -p $(INSTALL_ROOT)/usr/local/etc/badips.d
+	mkdir -p $(INSTALL_ROOT)/etc/systemd/system
+	mkdir -p $(INSTALL_ROOT)/usr/share/doc/$(PACKAGE)
+	mkdir -p $(INSTALL_ROOT)/usr/local/share/bad_ips
+
+	# Copy binaries
+	cp usr/local/sbin/bad_ips $(INSTALL_ROOT)/usr/local/sbin/
+	chmod +x $(INSTALL_ROOT)/usr/local/sbin/bad_ips
+
+	# Copy Perl modules
+	cp usr/local/lib/site_perl/BadIPs.pm $(INSTALL_ROOT)/usr/local/lib/site_perl/
+	cp -r usr/local/lib/site_perl/BadIPs $(INSTALL_ROOT)/usr/local/lib/site_perl/
+
+	# Copy configuration files
+	cp usr/local/etc/badips.d/*.conf $(INSTALL_ROOT)/usr/local/etc/badips.d/
+
+	# Copy systemd service
+	cp etc/systemd/system/bad_ips.service $(INSTALL_ROOT)/etc/systemd/system/
+
+	# Copy scripts
+	cp scripts/migrate_database_v2.pl $(INSTALL_ROOT)/usr/local/share/bad_ips/
+	chmod +x $(INSTALL_ROOT)/usr/local/share/bad_ips/migrate_database_v2.pl
+
+	# Copy documentation
+	cp README.md $(INSTALL_ROOT)/usr/share/doc/$(PACKAGE)/
+	cp docs/CONFIGURATION.md $(INSTALL_ROOT)/usr/share/doc/$(PACKAGE)/
+	cp VERSION $(INSTALL_ROOT)/usr/share/doc/$(PACKAGE)/
+
+	# Create DEBIAN control files directory
+	mkdir -p $(INSTALL_ROOT)/DEBIAN
+
+	# Create binary control file from source control
+	echo "Package: $(PACKAGE)" > $(INSTALL_ROOT)/DEBIAN/control
+	echo "Version: $(VERSION)" >> $(INSTALL_ROOT)/DEBIAN/control
+	grep -E '^(Section|Priority|Architecture|Depends|Maintainer|Description|Homepage):' debian/control >> $(INSTALL_ROOT)/DEBIAN/control
+
+	# Copy other control files
+	cp debian/conffiles $(INSTALL_ROOT)/DEBIAN/
+	cp debian/postinst $(INSTALL_ROOT)/DEBIAN/
+	cp debian/prerm $(INSTALL_ROOT)/DEBIAN/
+	cp debian/postrm $(INSTALL_ROOT)/DEBIAN/
+	chmod 755 $(INSTALL_ROOT)/DEBIAN/postinst
+	chmod 755 $(INSTALL_ROOT)/DEBIAN/prerm
+	chmod 755 $(INSTALL_ROOT)/DEBIAN/postrm
+
+	# Set default permissions
+	find $(INSTALL_ROOT) -type f -exec chmod 644 {} \;
+	find $(INSTALL_ROOT) -type d -exec chmod 755 {} \;
+
+	# Fix executable permissions
+	chmod +x $(INSTALL_ROOT)/usr/local/sbin/bad_ips
+	chmod +x $(INSTALL_ROOT)/usr/local/share/bad_ips/migrate_database_v2.pl
+	chmod 755 $(INSTALL_ROOT)/DEBIAN/postinst
+	chmod 755 $(INSTALL_ROOT)/DEBIAN/prerm
+	chmod 755 $(INSTALL_ROOT)/DEBIAN/postrm
+
+	# Build the binary package
+	dpkg-deb --build $(INSTALL_ROOT) ..
+
+binary-arch:
+	# Nothing to do
+
+binary: binary-indep binary-arch
+
+.PHONY: binary binary-arch binary-indep build clean
