@@ -1358,7 +1358,24 @@ sub _worker_nft_blocker {
         my $item = $ips_to_block_queue->dequeue();
         last if ( ! defined $item );  # Queue has ended
 
+        my $queue_size = $ips_to_block_queue->pending();
+        $log->debug("Queue size is $queue_size");
+
+        $log->debug("Dequeued item: " . Dumper($item));
+
         next if _should_skip_ip(%args, item => $item, blocked => \%blocked_in_thread, conf => $conf);
+
+        $log->debug("Trying to block item: " . Dumper($item));
+
+        # Verify required fields are clean before attempting block
+        unless (defined $item->{ip} && $item->{ip} =~ /^[\da-fA-F:.]+$/) {
+            $log->debug("Invalid IP format, skipping item: " . Dumper($item));
+            next;
+        }
+        unless (defined $item->{ttl} && $item->{ttl} =~ /^\d+$/) {
+            $log->debug("Invalid TTL format, using default ttl=$ttl for item: " . Dumper($item));
+            $item->{ttl} = $ttl;
+        }
 
         my $res = _nft_block_ip(
             ip   => $item->{ip},
@@ -1367,6 +1384,7 @@ sub _worker_nft_blocker {
         );
 
         if ($res->{ok}) {
+            $log->debug("Block item: " . Dumper($item));
             $blocked_in_thread{$item->{ip}} = $res->{expires};
             _enqueue_central_db_update(item => $item, expires => $res->{expires}); # Pretty much fire-and-forget
         } else {
