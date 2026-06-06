@@ -8,7 +8,7 @@ use Regexp::Common qw(net);  # Exports %RE{net}
 use Data::Dumper;
 use List::Util qw(any);
 use JSON qw(decode_json);
-our $VERSION = '3.5.24';
+our $VERSION = '3.5.25';
 
 my $log = get_logger();
 

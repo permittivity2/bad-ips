@@ -28,7 +28,7 @@ $Data::Dumper::Indent   = 1;
 
 my $log = get_logger("BadIPs") || die "You MUST initialize Log::Log4perl before using BadIPs module";
 
-our $VERSION = '3.5.24';
+our $VERSION = '3.5.25';
 
 # -------------------------------------------------------------------------
 # Shared state for all threads
@@ -1373,8 +1373,9 @@ sub _worker_nft_blocker {
             $log->debug("Invalid IP format, skipping item: " . Dumper($item));
             next;
         }
-        unless (defined $item->{ttl} && $item->{ttl} =~ /^\d+$/) {
-            $log->debug("Invalid TTL format, using default ttl=$ttl for item: " . Dumper($item));
+        my $ttl_to_use = $item->{ttl} || $ttl;
+        unless ( $ttl_to_use && $ttl_to_use =~ /^\d+$/ && $ttl_to_use > 0 ) {
+            $log->info("Invalid TTL format, using default ttl=$ttl for item: " . Dumper($item));
             $item->{ttl} = $ttl;
         }
 
