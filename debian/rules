@@ -80,7 +80,10 @@ binary-indep: clean build
 	chmod 755 $(INSTALL_ROOT)/DEBIAN/postrm
 
 	# Build the binary package directly (no debhelper, no buildinfo)
-	dpkg-deb --build $(INSTALL_ROOT) ..
+	dpkg-deb --build $(INSTALL_ROOT) .
+
+	# Register the created package so dpkg-buildpackage knows about it
+	echo "$(PACKAGE)_$(VERSION)_all.deb admin optional" > debian/files
 
 binary-arch:
 	# Nothing to do - architecture-independent package only
