@@ -1,0 +1,18 @@
+# Exclude patterns from source distribution
+# Build artifacts and temporary files
+.git
+.gitignore
+.dpkg-ignore
+build/
+debian/bad-ips/
+debian/files
+debian/substvars
+debian/*.buildinfo
+debian/*.changes
+*.deb
+*.dsc
+*.tar.xz
+.claude/
+.pytest_cache/
+*.pyc
+__pycache__

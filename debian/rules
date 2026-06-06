@@ -9,6 +9,8 @@ VERSION=$(shell grep '^bad-ips' debian/changelog | head -1 | sed 's/.*(\(.*\)).*
 
 # Targets required by dpkg-source
 build:
+	# Ensure source directories are readable (for dpkg-genbuildinfo)
+	find usr -type d -exec chmod a+rx {} \;
 	# Nothing to build - pure Perl application
 
 clean:
