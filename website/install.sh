@@ -1276,6 +1276,37 @@ backup_nftables_config() {
     nft list ruleset > "/etc/nftables.conf.runtime.bak.${BACKUP_TIMESTAMP}" 2>/dev/null || true
 }
 
+# Check if old badips table definition exists in nftables.conf
+check_old_badips_table() {
+    if [ -f /etc/nftables.conf ]; then
+        # Check if badips table is defined in nftables.conf (not just as a comment)
+        if grep -q "^table inet badips" /etc/nftables.conf; then
+            echo ""
+            echo -e "${YELLOW}⚠️  Old badips table definition found in /etc/nftables.conf${NC}"
+            echo ""
+            echo "Bad IPs now uses /etc/nftables.d/99-badips.nft for configuration."
+            echo "The old definition in /etc/nftables.conf should be removed to avoid duplicates."
+            echo ""
+            echo "To fix this, run:"
+            echo "  sudo sed -i '/^table inet badips {/,/^}/d' /etc/nftables.conf"
+            echo ""
+            echo "Or manually remove the 'table inet badips { ... }' block from /etc/nftables.conf"
+            echo ""
+            read -p "Would you like me to remove it automatically? [y/N] " -n 1 -r
+            echo
+            if [[ $REPLY =~ ^[Yy]$ ]]; then
+                sed -i '/^table inet badips {/,/^}/d' /etc/nftables.conf
+                echo -e "${GREEN}✓${NC} Removed old badips table from /etc/nftables.conf"
+                return 0
+            else
+                echo -e "${YELLOW}⚠️  Please remove it manually or re-run this script and answer 'y'${NC}"
+                return 1
+            fi
+        fi
+    fi
+    return 0
+}
+
 # Setup nftables include mechanism
 setup_nftables_include() {
     # Create include directory
@@ -1435,6 +1466,10 @@ setup_nftables() {
 
     # Backup existing configuration
     backup_nftables_config
+
+    # Check for and offer to remove old badips table definition
+    check_old_badips_table
+    # Continue even if user declines (they can fix manually)
 
     # Setup include mechanism
     setup_nftables_include
