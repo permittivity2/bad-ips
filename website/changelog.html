@@ -173,12 +173,52 @@
             </p>
         </div>
 
+        <!-- Version 3.5.24 -->
+        <div class="version-card">
+            <div class="version-header">
+                <div>
+                    <span class="version-number">v3.5.24</span>
+                    <span class="badge badge-latest">LATEST</span>
+                </div>
+                <div class="version-date">June 6, 2026</div>
+            </div>
+
+            <div class="category">
+                <div class="category-title fixed">
+                    <span class="icon">🐛</span> Fixed
+                </div>
+                <ul>
+                    <li><strong>Config::Tiny Inline Comment Parsing:</strong> Fixed critical bug where inline comments in configuration files (e.g., <code>escalation_ttl_1 = 600 # comment</code>) were read as literal values, causing numeric operations to fail. Postfix plugin now correctly parses configuration values by placing comments on separate lines.</li>
+                    <li><strong>Initial Fetch Window:</strong> Updated Postfix plugin initial fetch from 300 seconds to 3600 seconds (1 hour) for better historical log coverage on startup.</li>
+                </ul>
+            </div>
+
+            <div class="category">
+                <div class="category-title changed">
+                    <span class="icon">🔄</span> Changed
+                </div>
+                <ul>
+                    <li><strong>Postfix Plugin Logging:</strong> Removed verbose debug output from pattern matching and IP extraction. Plugin now logs only essential information about blocking actions, reducing log clutter while maintaining visibility of actual blocks.</li>
+                    <li><strong>nft_blocker Input Validation:</strong> Enhanced worker thread with strict input validation to prevent malformed data from plugins from reaching nftables. Invalid IPs are skipped, invalid TTLs fall back to defaults.</li>
+                </ul>
+            </div>
+
+            <div class="category">
+                <div class="category-title security">
+                    <span class="icon">🔒</span> Security
+                </div>
+                <ul>
+                    <li><strong>Plugin Data Validation:</strong> Added format validation for IP addresses (hex digits, dots, colons only) and TTL values (numeric only) in nft_blocker worker. Protects against injection or corruption from misbehaving plugins.</li>
+                    <li><strong>Queue Monitoring:</strong> Improved logging of queue sizes and item details for better visibility of data flowing through the blocking pipeline, aiding in troubleshooting and security monitoring.</li>
+                </ul>
+            </div>
+        </div>
+
         <!-- Version 3.5.23 -->
         <div class="version-card">
             <div class="version-header">
                 <div>
                     <span class="version-number">v3.5.23</span>
-                    <span class="badge badge-latest">LATEST</span>
                 </div>
                 <div class="version-date">June 6, 2026</div>
             </div>
