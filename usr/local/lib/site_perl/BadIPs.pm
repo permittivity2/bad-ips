@@ -28,7 +28,7 @@ $Data::Dumper::Indent   = 1;
 
 my $log = get_logger("BadIPs") || die "You MUST initialize Log::Log4perl before using BadIPs module";
 
-our $VERSION = '3.5.22';
+our $VERSION = '3.5.23';
 
 # -------------------------------------------------------------------------
 # Shared state for all threads
@@ -1362,13 +1362,13 @@ sub _worker_nft_blocker {
 
         my $res = _nft_block_ip(
             ip   => $item->{ip},
-            ttl  => $ttl,
+            ttl  => $item->{ttl} || $ttl,
             nft  => $nft,
         );
 
         if ($res->{ok}) {
             $blocked_in_thread{$item->{ip}} = $res->{expires};
-            _enqueue_central_db_update(item => $item, expires => $res->{expires}); # PRetty much fire-and-forget
+            _enqueue_central_db_update(item => $item, expires => $res->{expires}); # Pretty much fire-and-forget
         } else {
             $log->debug("NFT block failed but this is probably not an actual error for $item->{ip}: $res->{err}");
         }

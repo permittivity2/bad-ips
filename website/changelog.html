@@ -173,12 +173,53 @@
             </p>
         </div>
 
+        <!-- Version 3.5.23 -->
+        <div class="version-card">
+            <div class="version-header">
+                <div>
+                    <span class="version-number">v3.5.23</span>
+                    <span class="badge badge-latest">LATEST</span>
+                </div>
+                <div class="version-date">June 6, 2026</div>
+            </div>
+
+            <div class="category">
+                <div class="category-title added">
+                    <span class="icon">✨</span> Added
+                </div>
+                <ul>
+                    <li><strong>Postfix Plugin for Distributed Attack Detection:</strong> New dedicated <code>BadIPs::Plugins::Postfix</code> plugin monitors Postfix logs for authentication failures and protocol violations with sophisticated username-based tracking. Detects distributed brute force attacks targeting the same account from multiple IP addresses.</li>
+                    <li><strong>Username-Based SASL Failure Tracking:</strong> Implements distributed attack detection by tracking failed SASL authentication attempts by username rather than per-IP. When 3+ attempts to the same username occur within a 10-minute window (from any IP), all attacking IPs are blocked with escalating TTL durations.</li>
+                    <li><strong>Protocol Violation Immediate Blocking:</strong> Instant per-IP blocking for non-SMTP commands, improper pipelining, and other protocol violations. Each violation increments an offense counter with escalating block durations (10 min → 1 hr → 6 hrs → 24 hrs → 7 days).</li>
+                    <li><strong>Escalating Block Duration System:</strong> Multi-level TTL escalation for both SASL attacks (per-username) and protocol violations (per-IP). Persistent attackers receive increasingly longer blocks: 1st offense 10 minutes, 5th+ offense 7 days. Offense counters reset after 30 days of good behavior.</li>
+                    <li><strong>TTL Parameter Support:</strong> Enhanced BadIPs.pm to accept custom per-IP TTL values in enqueue operations (<code>$item->{ttl}</code>), allowing plugins to specify different block durations based on attack severity and persistence.</li>
+                </ul>
+            </div>
+
+            <div class="category">
+                <div class="category-title changed">
+                    <span class="icon">🔄</span> Changed
+                </div>
+                <ul>
+                    <li><strong>Postfix Configuration Migration:</strong> Converted old detector-based Postfix configuration to new plugin-based format in <code>20-postfix.conf</code>. Plugin-based approach enables threshold tracking, username-based analysis, and escalating penalties that were not possible with simple pattern matching.</li>
+                </ul>
+            </div>
+
+            <div class="category">
+                <div class="category-title fixed">
+                    <span class="icon">🐛</span> Fixed
+                </div>
+                <ul>
+                    <li><strong>BadIPs.pm Typo:</strong> Fixed typo in database update comment from "PRetty" to "Pretty" (line 1371).</li>
+                </ul>
+            </div>
+        </div>
+
         <!-- Version 3.5.22 -->
         <div class="version-card">
             <div class="version-header">
                 <div>
                     <span class="version-number">v3.5.22</span>
-                    <span class="badge badge-latest">LATEST</span>
                 </div>
                 <div class="version-date">June 5, 2026</div>
             </div>

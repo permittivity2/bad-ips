@@ -1,4 +1,4 @@
-.TH BAD_IPS 8 "December 2025" "Bad IPs 3.5.22" "System Administration"
+.TH BAD_IPS 8 "June 2026" "Bad IPs 3.5.23" "System Administration"
 .SH NAME
 bad_ips \- distributed IP blocking system with centralized database
 .SH SYNOPSIS
@@ -132,6 +132,40 @@ units = ssh.service, sshd.service
 pattern1 = Failed password for invalid user
 pattern2 = Failed password for root
 pattern3 = Connection closed by authenticating user
+.fi
+.RE
+.SS Plugin Configuration
+.B Bad IPs
+supports dedicated plugins for sophisticated attack detection beyond simple pattern matching. Plugins run in separate threads and can maintain internal state, implement thresholds, and apply custom blocking strategies.
+.PP
+.SS Postfix Plugin
+The
+.B Postfix
+plugin monitors Postfix logs for authentication failures and protocol violations with threshold-based detection. It is configured in
+.I /usr/local/etc/badips.d/20-postfix.conf
+.PP
+.B Key Features:
+.RS
+.B "Username-Based Attack Detection:"
+Detects distributed brute force attacks by tracking failed authentication attempts targeting the same email address from multiple IP addresses. When 3+ attempts to the same username occur within 10 minutes, all attacking IPs are blocked with escalating durations.
+.br
+.B "Protocol Violation Blocking:"
+Immediately blocks IPs sending non-SMTP commands, improper pipelining, or other protocol violations.
+.br
+.B "Escalating Block Durations:"
+First offense blocks for 10 minutes, subsequent offenses escalate to 1 hour, 6 hours, 24 hours, and 7 days maximum. Offense counters reset after 30 days of good behavior.
+.RE
+.PP
+.B Configuration Example:
+.RS
+.nf
+[Plugins:Postfix]
+active = 1
+sasl_failures_count = 3
+sasl_failures_window = 600
+escalation_ttl_1 = 600
+escalation_ttl_2 = 3600
+escalation_ttl_3 = 21600
 .fi
 .RE
 .SH SYSTEMD INTEGRATION
