@@ -337,8 +337,14 @@ sub _process_log_lines {
         } elsif ($category eq 'sasl_failures') {
             # Username-based threshold tracking
             my $extracted = $self->_extract_sasl_info($line);
+            $self->{log}->info("SASL pattern matched: extracted=" . ($extracted ? "YES" : "NO") . ", line=$line");
+            if ($extracted) {
+                $self->{log}->info("  -> IP=" . ($extracted->{ip} || 'UNDEF') . ", USERNAME=" . ($extracted->{username} || 'UNDEF'));
+            }
             if ($extracted && $extracted->{ip} && $extracted->{username}) {
                 $self->_handle_sasl_failure($extracted->{ip}, $extracted->{username}, $line);
+            } else {
+                $self->{log}->info("  -> SKIPPING: extraction incomplete");
             }
         } elsif ($category eq 'relay_denials') {
             # IP-based threshold tracking
@@ -392,14 +398,19 @@ sub _extract_ip {
     # Postfix format: "from unknown[147.185.132.193]:52752"
     # or: "from ec2-13-58-162-150.us-east-2.compute.amazonaws.com[13.58.162.150]:60536"
     if ($line =~ /from (?:unknown|\S+)\[($RE{net}{IPv4}|$RE{net}{IPv6})\]/) {
-        return $1;
+        my $ip = $1;
+        $self->{log}->debug("_extract_ip: Found IP via 'from' pattern: $ip");
+        return $ip;
     }
 
     # Fallback: just find any IP in the line
     if ($line =~ /($RE{net}{IPv4}|$RE{net}{IPv6})/) {
-        return $1;
+        my $ip = $1;
+        $self->{log}->debug("_extract_ip: Found IP via fallback pattern: $ip");
+        return $ip;
     }
 
+    $self->{log}->debug("_extract_ip: NO IP FOUND in line");
     return undef;
 }
 
