@@ -89,11 +89,11 @@ sub new {
 
     # Escalating block durations (TTL in seconds)
     $self->{escalation_ttls} = {
-        1 => $plugin_confs->{escalation_ttl_1} || 600,      # 10 minutes
-        2 => $plugin_confs->{escalation_ttl_2} || 3600,     # 1 hour
-        3 => $plugin_confs->{escalation_ttl_3} || 21600,    # 6 hours
-        4 => $plugin_confs->{escalation_ttl_4} || 86400,    # 24 hours
-        5 => $plugin_confs->{escalation_ttl_5} || 604800,   # 7 days
+        1 => $plugin_confs->{escalation_ttl_1} || 600,
+        2 => $plugin_confs->{escalation_ttl_2} || 3600,
+        3 => $plugin_confs->{escalation_ttl_3} || 21600,
+        4 => $plugin_confs->{escalation_ttl_4} || 86400,
+        5 => $plugin_confs->{escalation_ttl_5} || 604800,
     };
 
     $self->{cleanup_interval} = $plugin_confs->{cleanup_interval} || 300;
@@ -316,11 +316,6 @@ sub _process_log_lines {
         my $line = $line_obj->{message} || '';
         next unless $line;
 
-        # Log any SASL failures for debugging
-        if ($line =~ /SASL.*authentication failed/i) {
-            $self->{log}->warn("DEBUG SASL: $line");
-        }
-
         # Try to match against each category of patterns
         my $result = $self->_match_patterns($line);
         next unless $result;
@@ -337,14 +332,8 @@ sub _process_log_lines {
         } elsif ($category eq 'sasl_failures') {
             # Username-based threshold tracking
             my $extracted = $self->_extract_sasl_info($line);
-            $self->{log}->info("SASL pattern matched: extracted=" . ($extracted ? "YES" : "NO") . ", line=$line");
-            if ($extracted) {
-                $self->{log}->info("  -> IP=" . ($extracted->{ip} || 'UNDEF') . ", USERNAME=" . ($extracted->{username} || 'UNDEF'));
-            }
             if ($extracted && $extracted->{ip} && $extracted->{username}) {
                 $self->_handle_sasl_failure($extracted->{ip}, $extracted->{username}, $line);
-            } else {
-                $self->{log}->info("  -> SKIPPING: extraction incomplete");
             }
         } elsif ($category eq 'relay_denials') {
             # IP-based threshold tracking
@@ -398,19 +387,14 @@ sub _extract_ip {
     # Postfix format: "from unknown[147.185.132.193]:52752"
     # or: "from ec2-13-58-162-150.us-east-2.compute.amazonaws.com[13.58.162.150]:60536"
     if ($line =~ /from (?:unknown|\S+)\[($RE{net}{IPv4}|$RE{net}{IPv6})\]/) {
-        my $ip = $1;
-        $self->{log}->debug("_extract_ip: Found IP via 'from' pattern: $ip");
-        return $ip;
+        return $1;
     }
 
     # Fallback: just find any IP in the line
     if ($line =~ /($RE{net}{IPv4}|$RE{net}{IPv6})/) {
-        my $ip = $1;
-        $self->{log}->debug("_extract_ip: Found IP via fallback pattern: $ip");
-        return $ip;
+        return $1;
     }
 
-    $self->{log}->debug("_extract_ip: NO IP FOUND in line");
     return undef;
 }
 
@@ -484,13 +468,10 @@ Blocks ALL IPs that attempted a username when threshold is exceeded.
 sub _handle_sasl_failure {
     my ($self, $ip, $username, $line) = @_;
 
-    $self->{log}->info("_handle_sasl_failure: IP=$ip USERNAME=$username");
-
     my $now = time();
 
     # Initialize username tracking if needed
     if (!exists $self->{username_tracking}{$username}) {
-        $self->{log}->info("  Initializing tracking for username=$username");
         $self->{username_tracking}{$username} = {
             attempts           => [],
             offense_count      => 0,
