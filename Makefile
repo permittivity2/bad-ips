@@ -24,7 +24,7 @@ clean:
 deb:
 	@echo "Building $(DEB_NAME) using dpkg-buildpackage..."
 	@echo ""
-	dpkg-buildpackage -us -uc
+	dpkg-buildpackage -b -us -uc
 	@echo ""
 	@echo "==================================================================="
 	@echo "SUCCESS: Built $(DEB_NAME)"
