@@ -1381,20 +1381,14 @@ populate_static_nftables_sets() {
 reload_nftables() {
     echo "Reloading nftables configuration..."
 
-    # Clear all IP sets to remove duplicates and reduce configuration size
-    # Blocked IPs (badipv4/badipv6) will be repopulated by Bad IPs service as it runs
-    # Trusted/Always-block sets will be repopulated by install script below
-    echo "  Flushing all IP sets..."
-    nft flush set inet badips badipv4 2>/dev/null || true
-    nft flush set inet badips badipv6 2>/dev/null || true
-    nft flush set inet badips never_block 2>/dev/null || true
-    nft flush set inet badips never_block_v6 2>/dev/null || true
-    nft flush set inet badips always_block 2>/dev/null || true
-    nft flush set inet badips always_block_v6 2>/dev/null || true
+    # Delete the entire badips table to ensure clean reload
+    # This prevents duplicate rules from accumulating on repeated installs
+    echo "  Removing existing Bad IPs nftables infrastructure..."
+    nft delete table inet badips 2>/dev/null || true
 
     # Test configuration first
     if nft -c -f /etc/nftables.conf; then
-        # Reload the service
+        # Reload the service to recreate the table from config files
         if systemctl reload nftables.service; then
             echo -e "${GREEN}✓${NC} nftables configuration reloaded successfully"
             return 0
