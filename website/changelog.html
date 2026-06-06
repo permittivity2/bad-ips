@@ -173,12 +173,41 @@
             </p>
         </div>
 
+        <!-- Version 3.5.21 -->
+        <div class="version-card">
+            <div class="version-header">
+                <div>
+                    <span class="version-number">v3.5.21</span>
+                    <span class="badge badge-latest">LATEST</span>
+                </div>
+                <div class="version-date">June 6, 2026</div>
+            </div>
+
+            <div class="category">
+                <div class="category-title fixed">
+                    <span class="icon">🐛</span> Fixed
+                </div>
+                <ul>
+                    <li><strong>Database Connection Resilience:</strong> Implemented automatic database reconnection mechanism for both <code>central_db_sync</code> and <code>pull_global_blocks</code> worker threads. When a database operation fails, the system now attempts to reconnect up to 5 times (configurable) with exponential backoff before requeueing items. This prevents thread death during temporary database outages and ensures graceful degradation - local IP blocking continues uninterrupted even when the central database is temporarily unavailable.</li>
+                    <li><strong>Initial Connection Retry:</strong> Worker threads now retry the initial database connection instead of exiting immediately. This solves race conditions where bad_ips starts before the database service is ready.</li>
+                </ul>
+            </div>
+
+            <div class="category">
+                <div class="category-title added">
+                    <span class="icon">✨</span> Added
+                </div>
+                <ul>
+                    <li><strong>Configuration Parameters:</strong> New <code>db_retry_interval</code> (default: 3 seconds) and <code>db_max_retries</code> (default: 5) parameters allow tuning of reconnection behavior per deployment.</li>
+                </ul>
+            </div>
+        </div>
+
         <!-- Version 3.5.20 -->
         <div class="version-card">
             <div class="version-header">
                 <div>
                     <span class="version-number">v3.5.20</span>
-                    <span class="badge badge-latest">LATEST</span>
                 </div>
                 <div class="version-date">June 2, 2026</div>
             </div>

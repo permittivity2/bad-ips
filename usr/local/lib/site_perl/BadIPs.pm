@@ -28,7 +28,7 @@ $Data::Dumper::Indent   = 1;
 
 my $log = get_logger("BadIPs") || die "You MUST initialize Log::Log4perl before using BadIPs module";
 
-our $VERSION = '3.5.20';
+our $VERSION = '3.5.21';
 
 # -------------------------------------------------------------------------
 # Shared state for all threads
@@ -772,6 +772,10 @@ sub _load_config {
     $accum{db_password} //= '';
     $accum{db_ssl_mode} //= 'disable';
 
+    # Database reconnection configuration
+    $accum{db_retry_interval} //= 3;        # Seconds between retry attempts
+    $accum{db_max_retries}    //= 5;        # Maximum number of reconnection attempts
+
     # Normalize comma lists
     $accum{journal_units}         = _csv_to_array($accum{journal_units});
     $accum{bad_conn_patterns}     = _csv_to_array($accum{bad_conn_patterns});
@@ -1509,6 +1513,8 @@ sub _worker_central_db_sync {
     my $batch_timeout = $conf->{central_db_batch_timeout} || 5;
     my $batch_size    = $conf->{central_db_batch_size} || 50;
     my $thread_name = $args{thread_name} ||  (caller(0))[3];
+    my $db_retry_interval = $conf->{db_retry_interval} || 3;
+    my $db_max_retries = $conf->{db_max_retries} || 5;
 
     Log::Log4perl::MDC->put("THREAD" => $thread_name);
 
@@ -1523,9 +1529,22 @@ sub _worker_central_db_sync {
         db_ssl_mode => $conf->{db_ssl_mode},
     );
 
-    my $dbh = $db->connect();
+    # Retry initial connection instead of exiting
+    my $dbh;
+    my $retries = 0;
+    while ($retries < $db_max_retries) {
+        $dbh = $db->connect();
+        last if $dbh;
+
+        $retries++;
+        if ($retries < $db_max_retries) {
+            $log->warn("central_db_sync_thread: initial connection failed, retry $retries/$db_max_retries in ${db_retry_interval}s");
+            sleep $db_retry_interval;
+        }
+    }
+
     unless ($dbh) {
-        $log->warn("central_db_sync_thread: no database connection, exiting");
+        $log->error("central_db_sync_thread: failed to connect after $db_max_retries attempts, exiting");
         return;
     }
 
@@ -1554,22 +1573,62 @@ sub _worker_central_db_sync {
             }
         }
 
-        eval {
-            _db_upsert_blocked_ip_batch(
-                dbh   => $dbh,
-                db    => $db,
-                conf  => $conf,
-                batch => \@batch,
-            );
-        };
-        if ($@) {
-            $log->info("Central DB batch INSERT failed: $@; requeueing items");
-            $sync_to_central_db_queue->enqueue(@batch);
-            sleep 10;
-        } else {
+        my $operation_retry = 0;
+        my $operation_success = 0;
+
+        while ($operation_retry < $db_max_retries && !$operation_success) {
+            eval {
+                _db_upsert_blocked_ip_batch(
+                    dbh   => $dbh,
+                    db    => $db,
+                    conf  => $conf,
+                    batch => \@batch,
+                );
+                $operation_success = 1;
+            };
+
+            if ($@) {
+                $operation_retry++;
+                my $error_msg = $@;
+
+                # Try to reconnect
+                $log->warn("central_db_sync_thread: operation failed: $error_msg");
+
+                if ($operation_retry < $db_max_retries) {
+                    $log->info("central_db_sync_thread: attempting reconnection (attempt $operation_retry/$db_max_retries)");
+
+                    # Close dead connection
+                    eval { $dbh->disconnect() if $dbh };
+
+                    # Attempt reconnection with backoff
+                    my $reconnect_delay = $db_retry_interval * $operation_retry;  # Linear backoff for operations
+                    sleep $reconnect_delay;
+
+                    $dbh = $db->connect();
+                    if ($dbh) {
+                        $log->info("central_db_sync_thread: reconnection successful, retrying operation");
+                    } else {
+                        $log->warn("central_db_sync_thread: reconnection failed, will retry operation ($operation_retry/$db_max_retries)");
+                    }
+                } else {
+                    # Out of retries - requeue items and continue (don't exit!)
+                    $log->error("central_db_sync_thread: operation failed after $db_max_retries retries");
+                }
+            }
+        }
+
+        if ($operation_success) {
             my @ips = map { $_->{ip} } @batch;
             $log->info("Synced or updated " . scalar(@batch) . " IP" . (scalar(@batch) == 1 ? '' : 's') .
                        " to central DB: " . join(", ", @ips));
+        } else {
+            # Operation failed after all retries - requeue items but don't exit thread
+            $log->warn("central_db_sync_thread: requeuing " . scalar(@batch) . " items (queue full will block, consider increasing queue size)");
+
+            # Use blocking enqueue - will wait if queue is full (not ideal but safe)
+            # Alternative: use enqueue_nb() and drop if full, but that loses data
+            $sync_to_central_db_queue->enqueue(@batch);
+            sleep 10;  # Back off before next iteration
         }
     }
 
@@ -1600,6 +1659,8 @@ sub _worker_pull_global_blocks {
     my (%args) = @_;
     my $conf = $args{conf} || {};
     my $thread_name = $args{thread_name} ||  (caller(0))[3];
+    my $db_retry_interval = $conf->{db_retry_interval} || 3;
+    my $db_max_retries = $conf->{db_max_retries} || 5;
 
     Log::Log4perl::MDC->put("THREAD" => $thread_name);
 
@@ -1614,9 +1675,22 @@ sub _worker_pull_global_blocks {
         db_ssl_mode => $conf->{db_ssl_mode},
     );
 
-    my $dbh = $db->connect();
+    # Retry initial connection instead of exiting
+    my $dbh;
+    my $retries = 0;
+    while ($retries < $db_max_retries) {
+        $dbh = $db->connect();
+        last if $dbh;
+
+        $retries++;
+        if ($retries < $db_max_retries) {
+            $log->warn("pull_global_blocks_thread: initial connection failed, retry $retries/$db_max_retries in ${db_retry_interval}s");
+            sleep $db_retry_interval;
+        }
+    }
+
     unless ($dbh) {
-        $log->warn("pull_global_blocks_thread: no database connection, exiting");
+        $log->error("pull_global_blocks_thread: failed to connect after $db_max_retries attempts, exiting");
         return;
     }
 
@@ -1634,34 +1708,66 @@ sub _worker_pull_global_blocks {
         last if _get_shutdown_flag() || _get_reload_flag();
 
         my $new_blocks = 0;
+        my $query_retry = 0;
+        my $query_success = 0;
 
-        eval {
-            # Use DB module to pull global blocks
-            my $blocks = $db->pull_global_blocks($dbh, $hostname, $last_check);
+        while ($query_retry < $db_max_retries && !$query_success) {
+            eval {
+                # Use DB module to pull global blocks
+                my $blocks = $db->pull_global_blocks($dbh, $hostname, $last_check);
 
-            for my $block (@$blocks) {
-                $new_blocks++;
-                $ips_to_block_queue->enqueue({
-                    ip       => $block->{ip},
-                    source   => "central_db:global_sync",
-                    detector => 'global_sync',
-                    line     => undef,
-                });
+                for my $block (@$blocks) {
+                    $new_blocks++;
+                    $ips_to_block_queue->enqueue({
+                        ip       => $block->{ip},
+                        source   => "central_db:global_sync",
+                        detector => 'global_sync',
+                        line     => undef,
+                    });
+                }
+
+                $last_check = time();
+                $query_success = 1;
+            };
+
+            if ($@) {
+                $query_retry++;
+                my $error_msg = $@;
+
+                $log->warn("pull_global_blocks_thread: query failed: $error_msg");
+
+                if ($query_retry < $db_max_retries) {
+                    $log->info("pull_global_blocks_thread: attempting reconnection (attempt $query_retry/$db_max_retries)");
+
+                    # Close dead connection
+                    eval { $dbh->disconnect() if $dbh };
+
+                    # Attempt reconnection with backoff
+                    my $reconnect_delay = $db_retry_interval * $query_retry;
+                    sleep $reconnect_delay;
+
+                    $dbh = $db->connect();
+                    if ($dbh) {
+                        $log->info("pull_global_blocks_thread: reconnection successful, retrying query");
+                    } else {
+                        $log->warn("pull_global_blocks_thread: reconnection failed, will retry query ($query_retry/$db_max_retries)");
+                    }
+                } else {
+                    $log->error("pull_global_blocks_thread: query failed after $db_max_retries retries, skipping this cycle");
+                }
             }
-
-            $last_check = time();
-        };
-        if ($@) {
-            $log->info("pull_global_blocks_thread: query failed: $@");
-            sleep 10;
-            next;
         }
 
-        if ($new_blocks > 0) {
+        if ($query_success && $new_blocks > 0) {
             $log->info("pull_global_blocks_thread: pulled $new_blocks new blocks from central DB");
             $pull_interval = $min_interval;
-        } else {
+        } elsif ($query_success) {
+            # Query succeeded but no new blocks
             $pull_interval = $pull_interval + $step;
+            $pull_interval = $max_interval if $pull_interval > $max_interval;
+        } else {
+            # Query failed - back off pull interval, will retry next cycle
+            $pull_interval = $min_interval * 2;
             $pull_interval = $max_interval if $pull_interval > $max_interval;
         }
     }
