@@ -411,6 +411,36 @@ log4perl.rootLogger = DEBUG, SYS</code></pre>
                 </tr>
             </table>
 
+            <h3>Database Resilience Parameters (Optional)</h3>
+            <p>These optional parameters in <code>/usr/local/etc/badips.conf</code> control how the system handles temporary database outages:</p>
+            <table>
+                <tr>
+                    <th>Parameter</th>
+                    <th>Description</th>
+                    <th>Default</th>
+                </tr>
+                <tr>
+                    <td><code>db_retry_interval</code></td>
+                    <td>Seconds between reconnection attempts (exponential backoff: 3s, 6s, 9s, ...)</td>
+                    <td>3</td>
+                </tr>
+                <tr>
+                    <td><code>db_max_retries</code></td>
+                    <td>Maximum number of reconnection attempts before requeuing operation</td>
+                    <td>5</td>
+                </tr>
+            </table>
+
+            <h3>Resilience Configuration Notes</h3>
+            <div class="alert info">
+                <strong>Database Outage Handling:</strong> When the database becomes temporarily unavailable, Bad IPs automatically attempts to reconnect instead of failing. After exhausting reconnection attempts, operations are requeued and the system continues operating. <strong>Local IP blocking is never interrupted</strong> by database failures.
+            </div>
+            <ul>
+                <li><strong>db_retry_interval:</strong> Lower values (1-2s) provide faster recovery for brief outages but increase database load during reconnection. Higher values (5-10s) reduce load on an already-stressed database but delay recovery.</li>
+                <li><strong>db_max_retries:</strong> Higher values (8-10) are better for unreliable networks or slow database startup. Lower values (3) provide faster failure detection for truly broken configurations.</li>
+                <li><strong>Example calculation:</strong> With defaults (interval=3, retries=5), backoff is 3s, 6s, 9s, 12s, 15s = 45s total recovery window</li>
+            </ul>
+
             <h3>Example Configuration</h3>
             <div class="code-block">[global]
 db_host = 10.10.0.116
