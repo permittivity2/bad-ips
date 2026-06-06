@@ -316,6 +316,11 @@ sub _process_log_lines {
         my $line = $line_obj->{message} || '';
         next unless $line;
 
+        # Log any SASL failures for debugging
+        if ($line =~ /SASL.*authentication failed/i) {
+            $self->{log}->warn("DEBUG SASL: $line");
+        }
+
         # Try to match against each category of patterns
         my $result = $self->_match_patterns($line);
         next unless $result;
@@ -365,7 +370,8 @@ sub _match_patterns {
         my $patterns = $self->{patterns}{$category} || {};
         for my $desc (keys %$patterns) {
             my $pattern = $patterns->{$desc};
-            if ($line =~ /$pattern/) {
+            # Pattern is stored as regex string, try to match
+            if ($line =~ /$pattern/i) {  # Case-insensitive match
                 return { category => $category, pattern_desc => $desc };
             }
         }
@@ -467,10 +473,13 @@ Blocks ALL IPs that attempted a username when threshold is exceeded.
 sub _handle_sasl_failure {
     my ($self, $ip, $username, $line) = @_;
 
+    $self->{log}->info("_handle_sasl_failure: IP=$ip USERNAME=$username");
+
     my $now = time();
 
     # Initialize username tracking if needed
     if (!exists $self->{username_tracking}{$username}) {
+        $self->{log}->info("  Initializing tracking for username=$username");
         $self->{username_tracking}{$username} = {
             attempts           => [],
             offense_count      => 0,
@@ -510,6 +519,8 @@ Blocks ALL IPs that attempted the username with escalating TTL.
 sub _trigger_sasl_blocking {
     my ($self, $username, $tracking, $line) = @_;
 
+    $self->{log}->info("_trigger_sasl_blocking: username=$username");
+
     my $now = time();
 
     # Increment offense count for this username
@@ -534,6 +545,7 @@ sub _trigger_sasl_blocking {
     # Enqueue all IPs with same escalating TTL
     for my $ip (@ips_to_block) {
         if ($self->_should_enqueue_ip($ip)) {
+            $self->{log}->info("  Enqueueing IP: $ip for TTL $ttl");
             # Mark as blocked in this event
             for my $attempt (@{ $tracking->{attempts} }) {
                 $attempt->{blocked} = 1 if $attempt->{ip} eq $ip;
@@ -547,6 +559,8 @@ sub _trigger_sasl_blocking {
                 line            => $line,
                 target_username => $username,
             );
+        } else {
+            $self->{log}->info("  IP $ip already queued recently, skipping");
         }
     }
 }
