@@ -1,23 +1,25 @@
 #!/usr/bin/make -f
 
 # Debian package build rules for bad-ips
-# Minimal rules without debhelper dependency
+# Pure Perl package with custom install rules (no debhelper)
 
 PACKAGE=bad-ips
 INSTALL_ROOT=debian/$(PACKAGE)
 VERSION=$(shell grep '^bad-ips' debian/changelog | head -1 | sed 's/.*(\(.*\)).*/\1/')
 
+# Targets required by dpkg-source
 build:
 	# Nothing to build - pure Perl application
 
 clean:
 	rm -rf $(INSTALL_ROOT)
-	rm -f debian/*.debhelper
-	rm -f debian/substvars
 	rm -f debian/files
-	rm -rf debian/.debhelper
+	rm -f debian/substvars
 
-binary-indep: build
+# Binary package installation
+binary: binary-indep
+
+binary-indep: clean build
 	# Create directory structure
 	mkdir -p $(INSTALL_ROOT)/usr/local/sbin
 	mkdir -p $(INSTALL_ROOT)/usr/local/lib/site_perl
@@ -52,12 +54,12 @@ binary-indep: build
 	# Create DEBIAN control files directory
 	mkdir -p $(INSTALL_ROOT)/DEBIAN
 
-	# Create binary control file from source control
+	# Build binary control file from source control
 	echo "Package: $(PACKAGE)" > $(INSTALL_ROOT)/DEBIAN/control
 	echo "Version: $(VERSION)" >> $(INSTALL_ROOT)/DEBIAN/control
 	grep -E '^(Section|Priority|Architecture|Depends|Maintainer|Description|Homepage):' debian/control >> $(INSTALL_ROOT)/DEBIAN/control
 
-	# Copy other control files
+	# Copy maintainer scripts
 	cp debian/conffiles $(INSTALL_ROOT)/DEBIAN/
 	cp debian/postinst $(INSTALL_ROOT)/DEBIAN/
 	cp debian/prerm $(INSTALL_ROOT)/DEBIAN/
@@ -77,12 +79,10 @@ binary-indep: build
 	chmod 755 $(INSTALL_ROOT)/DEBIAN/prerm
 	chmod 755 $(INSTALL_ROOT)/DEBIAN/postrm
 
-	# Build the binary package
+	# Build the binary package directly (no debhelper, no buildinfo)
 	dpkg-deb --build $(INSTALL_ROOT) ..
 
 binary-arch:
-	# Nothing to do
+	# Nothing to do - architecture-independent package only
 
-binary: binary-indep binary-arch
-
-.PHONY: binary binary-arch binary-indep build clean
+.PHONY: build clean binary binary-indep binary-arch
