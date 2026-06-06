@@ -1381,11 +1381,16 @@ populate_static_nftables_sets() {
 reload_nftables() {
     echo "Reloading nftables configuration..."
 
-    # Clear blocked IP elements from sets to reduce configuration size
-    # Bad IPs will repopulate these sets as it runs
-    echo "  Flushing blocked IP sets..."
+    # Clear all IP sets to remove duplicates and reduce configuration size
+    # Blocked IPs (badipv4/badipv6) will be repopulated by Bad IPs service as it runs
+    # Trusted/Always-block sets will be repopulated by install script below
+    echo "  Flushing all IP sets..."
     nft flush set inet badips badipv4 2>/dev/null || true
     nft flush set inet badips badipv6 2>/dev/null || true
+    nft flush set inet badips never_block 2>/dev/null || true
+    nft flush set inet badips never_block_v6 2>/dev/null || true
+    nft flush set inet badips always_block 2>/dev/null || true
+    nft flush set inet badips always_block_v6 2>/dev/null || true
 
     # Test configuration first
     if nft -c -f /etc/nftables.conf; then
