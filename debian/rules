@@ -1,98 +1,34 @@
 #!/usr/bin/make -f
 
 # Debian package build rules for bad-ips
-# Pure Perl package with custom install rules (no debhelper)
+# Uses debhelper for standard Debian packaging
 
-PACKAGE=bad-ips
-INSTALL_ROOT=debian/$(PACKAGE)
-VERSION=$(shell grep '^bad-ips' debian/changelog | head -1 | sed 's/.*(\(.*\)).*/\1/')
+%:
+	dh $@
 
-# Targets required by dpkg-source
-build:
-	# Ensure source directories are readable (for dpkg-genbuildinfo)
-	find usr -type d -exec chmod a+rx {} \;
-	# Nothing to build - pure Perl application
+# Don't use the Makefile for building - it's just a convenience wrapper
+# The Makefile is for users, not for debian packaging
+override_dh_auto_clean:
+	# Nothing to clean - pure Perl package
 
-clean:
-	rm -rf $(INSTALL_ROOT)
-	rm -f debian/files
-	rm -f debian/substvars
+override_dh_auto_build:
+	# Nothing to build - pure Perl package
 
-# Binary package installation
-binary: binary-indep
+override_dh_auto_test:
+	# No automated tests to run
 
-binary-indep: clean build
-	# Create directory structure
-	mkdir -p $(INSTALL_ROOT)/usr/local/sbin
-	mkdir -p $(INSTALL_ROOT)/usr/local/lib/site_perl
-	mkdir -p $(INSTALL_ROOT)/usr/local/etc/badips.d
-	mkdir -p $(INSTALL_ROOT)/etc/systemd/system
-	mkdir -p $(INSTALL_ROOT)/usr/share/doc/$(PACKAGE)
-	mkdir -p $(INSTALL_ROOT)/usr/share/man/man8
-	mkdir -p $(INSTALL_ROOT)/usr/local/share/bad_ips
+override_dh_auto_install:
+	# Don't use 'make install' - use dh_install with debian/install instead
+	dh_install
 
-	# Copy binaries
-	cp usr/local/sbin/bad_ips $(INSTALL_ROOT)/usr/local/sbin/
-	chmod +x $(INSTALL_ROOT)/usr/local/sbin/bad_ips
+# Skip dh_usrlocal - we intentionally install to /usr/local/
+override_dh_usrlocal:
+	# Bad IPs intentionally uses /usr/local/ for Perl modules
 
-	# Copy Perl modules
-	cp usr/local/lib/site_perl/BadIPs.pm $(INSTALL_ROOT)/usr/local/lib/site_perl/
-	cp -r usr/local/lib/site_perl/BadIPs $(INSTALL_ROOT)/usr/local/lib/site_perl/
-
-	# Copy configuration files
-	cp usr/local/etc/badips.d/*.conf $(INSTALL_ROOT)/usr/local/etc/badips.d/
-
-	# Copy systemd service
-	cp etc/systemd/system/bad_ips.service $(INSTALL_ROOT)/etc/systemd/system/
-
-	# Copy scripts
-	cp scripts/migrate_database_v2.pl $(INSTALL_ROOT)/usr/local/share/bad_ips/
-	chmod +x $(INSTALL_ROOT)/usr/local/share/bad_ips/migrate_database_v2.pl
-
-	# Copy documentation
-	cp README.md $(INSTALL_ROOT)/usr/share/doc/$(PACKAGE)/
-	cp docs/CONFIGURATION.md $(INSTALL_ROOT)/usr/share/doc/$(PACKAGE)/
-	cp VERSION $(INSTALL_ROOT)/usr/share/doc/$(PACKAGE)/
-
-	# Copy and compress man page
-	cp usr/share/man/man8/bad_ips.8 $(INSTALL_ROOT)/usr/share/man/man8/
-	gzip -9 $(INSTALL_ROOT)/usr/share/man/man8/bad_ips.8
-
-	# Create DEBIAN control files directory
-	mkdir -p $(INSTALL_ROOT)/DEBIAN
-
-	# Build binary control file from source control
-	echo "Package: $(PACKAGE)" > $(INSTALL_ROOT)/DEBIAN/control
-	echo "Version: $(VERSION)" >> $(INSTALL_ROOT)/DEBIAN/control
-	grep -E '^(Section|Priority|Architecture|Depends|Maintainer|Description|Homepage):' debian/control >> $(INSTALL_ROOT)/DEBIAN/control
-
-	# Copy maintainer scripts
-	cp debian/conffiles $(INSTALL_ROOT)/DEBIAN/
-	cp debian/postinst $(INSTALL_ROOT)/DEBIAN/
-	cp debian/prerm $(INSTALL_ROOT)/DEBIAN/
-	cp debian/postrm $(INSTALL_ROOT)/DEBIAN/
-	chmod 755 $(INSTALL_ROOT)/DEBIAN/postinst
-	chmod 755 $(INSTALL_ROOT)/DEBIAN/prerm
-	chmod 755 $(INSTALL_ROOT)/DEBIAN/postrm
-
-	# Set default permissions
-	find $(INSTALL_ROOT) -type f -exec chmod 644 {} \;
-	find $(INSTALL_ROOT) -type d -exec chmod 755 {} \;
-
-	# Fix executable permissions
-	chmod +x $(INSTALL_ROOT)/usr/local/sbin/bad_ips
-	chmod +x $(INSTALL_ROOT)/usr/local/share/bad_ips/migrate_database_v2.pl
-	chmod 755 $(INSTALL_ROOT)/DEBIAN/postinst
-	chmod 755 $(INSTALL_ROOT)/DEBIAN/prerm
-	chmod 755 $(INSTALL_ROOT)/DEBIAN/postrm
-
-	# Build the binary package directly (no debhelper, no buildinfo)
-	dpkg-deb --build $(INSTALL_ROOT) .
-
-	# Register the created package so dpkg-buildpackage knows about it
-	echo "$(PACKAGE)_$(VERSION)_all.deb admin optional" > debian/files
-
-binary-arch:
-	# Nothing to do - architecture-independent package only
-
-.PHONY: build clean binary binary-indep binary-arch
+# Override to ensure permissions are correct after install
+override_dh_fixperms:
+	dh_fixperms
+	# Ensure executables have correct permissions
+	chmod +x debian/bad-ips/usr/local/sbin/bad_ips
+	chmod +x debian/bad-ips/usr/local/sbin/bad_ips_installer.sh
+	chmod +x debian/bad-ips/usr/local/share/bad_ips/migrate_database_v2.pl

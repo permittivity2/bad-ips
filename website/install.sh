@@ -235,11 +235,44 @@ add_gpg_key() {
 
 # Add repository
 add_repository() {
-    echo -e "${BLUE}Adding Bad IPs apt repository...${NC}"
-    
-    echo "deb [signed-by=/etc/apt/keyrings/silver-linings.gpg] $REPO_URL ./" > /etc/apt/sources.list.d/bad-ips.list
-    
-    echo -e "${GREEN}✓${NC} Repository added"
+    echo ""
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${YELLOW}  REPOSITORY SELECTION${NC}"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo "Bad IPs provides two repository distributions:"
+    echo ""
+    echo -e "${CYAN}  [1] unstable${NC} - Latest builds with newest features and fixes"
+    echo "      Recommended for: Test systems, development, early adopters"
+    echo "      Update frequency: Frequent (as features are developed)"
+    echo ""
+    echo -e "${CYAN}  [2] stable${NC}   - Released versions, thoroughly tested"
+    echo "      Recommended for: Production systems, conservative deployments"
+    echo "      Update frequency: Less frequent (stable releases only)"
+    echo ""
+
+    read -p "Select distribution [1=unstable (default), 2=stable]: " DIST_CHOICE
+
+    case "${DIST_CHOICE:-1}" in
+        2)
+            DISTRIBUTION="stable"
+            ;;
+        1|"")
+            DISTRIBUTION="unstable"
+            ;;
+        *)
+            echo ""
+            echo -e "${YELLOW}Invalid choice. Using default: unstable${NC}"
+            DISTRIBUTION="unstable"
+            ;;
+    esac
+
+    echo ""
+    echo -e "${BLUE}Adding Bad IPs apt repository (${DISTRIBUTION})...${NC}"
+
+    echo "deb [signed-by=/etc/apt/keyrings/silver-linings.gpg] $REPO_URL $DISTRIBUTION main" > /etc/apt/sources.list.d/bad-ips.list
+
+    echo -e "${GREEN}✓${NC} Repository added: $DISTRIBUTION distribution"
 }
 
 # Update apt

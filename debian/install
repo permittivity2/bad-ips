@@ -1,0 +1,7 @@
+usr/local/sbin/bad_ips
+usr/local/sbin/bad_ips_installer.sh
+usr/local/lib/site_perl/BadIPs.pm
+usr/local/lib/site_perl/BadIPs
+usr/local/etc/badips.d/*.conf
+etc/systemd/system/bad_ips.service
+scripts/migrate_database_v2.pl usr/local/share/bad_ips/

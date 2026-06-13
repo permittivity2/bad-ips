@@ -163,6 +163,70 @@ fi
 echo ""
 echo -e "${GREEN}✓ Bad IPs nftables infrastructure ready${NC}"
 echo ""
-echo "You can now start the bad_ips service:"
-echo "  systemctl start bad_ips.service"
+
+# Stop the service if running
+echo "Stopping bad_ips service..."
+if systemctl is-active --quiet bad_ips.service; then
+    systemctl stop bad_ips.service
+    echo "  Service stop initiated"
+else
+    echo "  Service was not running"
+fi
+
+# Wait and verify it's stopped
+sleep 2
+MAX_WAIT=10
+WAITED=0
+while systemctl is-active --quiet bad_ips.service && [ $WAITED -lt $MAX_WAIT ]; do
+    echo "  Waiting for service to stop... ($WAITED/$MAX_WAIT seconds)"
+    sleep 1
+    WAITED=$((WAITED + 1))
+done
+
+if systemctl is-active --quiet bad_ips.service; then
+    echo -e "${YELLOW}  ⚠ Warning: Service did not stop cleanly${NC}"
+    systemctl status bad_ips.service --no-pager || true
+else
+    echo -e "${GREEN}  ✓ Service stopped${NC}"
+fi
+
+# Start the service
+echo ""
+echo "Starting bad_ips service..."
+if systemctl start bad_ips.service; then
+    echo "  Service start initiated"
+else
+    echo -e "${RED}  ✗ Failed to start service${NC}"
+    systemctl status bad_ips.service --no-pager || true
+    exit 1
+fi
+
+# Wait and verify it's running
+sleep 2
+MAX_WAIT=10
+WAITED=0
+while ! systemctl is-active --quiet bad_ips.service && [ $WAITED -lt $MAX_WAIT ]; do
+    echo "  Waiting for service to start... ($WAITED/$MAX_WAIT seconds)"
+    sleep 1
+    WAITED=$((WAITED + 1))
+done
+
+if systemctl is-active --quiet bad_ips.service; then
+    echo -e "${GREEN}  ✓ Service is running${NC}"
+    echo ""
+    echo -e "${GREEN}✓ Bad IPs service started successfully${NC}"
+    echo ""
+    echo "Service status:"
+    systemctl status bad_ips.service --no-pager -l | head -20
+else
+    echo -e "${RED}  ✗ Service failed to start${NC}"
+    echo ""
+    echo "Service status:"
+    systemctl status bad_ips.service --no-pager -l || true
+    echo ""
+    echo "Recent logs:"
+    journalctl -u bad_ips.service -n 50 --no-pager || true
+    exit 1
+fi
+
 exit 0
