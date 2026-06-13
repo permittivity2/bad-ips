@@ -172,10 +172,49 @@ detect_os() {
     fi
 }
 
+# Check if gpg is installed and install if needed
+check_gpg() {
+    if ! command -v gpg &> /dev/null; then
+        echo ""
+        echo -e "${YELLOW}GPG is not installed.${NC}"
+        echo ""
+        echo "GPG is required to verify the Bad IPs package signature."
+        echo ""
+        read -p "Would you like to install GPG now? [Y/n]: " INSTALL_GPG
+
+        if [[ "$INSTALL_GPG" =~ ^[Nn]$ ]]; then
+            echo ""
+            echo -e "${YELLOW}Installation cancelled.${NC}"
+            echo ""
+            echo "To install GPG manually and retry:"
+            echo "  sudo apt-get install gpg"
+            echo "  bash <(curl -fsSL https://projects.thedude.vip/bad-ips/install.sh)"
+            exit 0
+        fi
+
+        echo ""
+        echo -e "${BLUE}Installing GPG...${NC}"
+        if DEBIAN_FRONTEND=noninteractive apt-get install -y gpg; then
+            echo ""
+            echo -e "${GREEN}✓${NC} GPG installed successfully"
+        else
+            echo ""
+            echo -e "${RED}✗${NC} Failed to install GPG"
+            echo ""
+            echo "Please install GPG manually:"
+            echo "  sudo apt-get install gpg"
+            exit 1
+        fi
+    fi
+}
+
 # Add GPG key
 add_gpg_key() {
     echo ""
     echo -e "${BLUE}Adding Silver Linings, LLC GPG key...${NC}"
+
+    # Ensure GPG is installed
+    check_gpg
 
     # Remove old keys from both possible locations to avoid conflicts
     rm -f /etc/apt/keyrings/silver-linings.gpg

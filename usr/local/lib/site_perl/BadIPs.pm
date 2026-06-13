@@ -673,6 +673,7 @@ sub _load_config {
             if ($section =~ /^detector:(.+)/) {
                 my $detector_name = $1;
                 my $d = $c->{$section};
+                $log->debug("Processing detector section: $section with full dump: " . Dumper($d));
 
                 # Collect units from this detector
                 if ($d->{units}) {
@@ -779,10 +780,10 @@ sub _load_config {
     # Normalize comma lists
     $accum{journal_units}         = _csv_to_array($accum{journal_units});
     $accum{bad_conn_patterns}     = _csv_to_array($accum{bad_conn_patterns});
-    $accum{never_block_cidrs}     = _csv_to_array($accum{never_block_cidrs});
-    $accum{never_block_cidrs_v6}  = _csv_to_array($accum{never_block_cidrs_v6});
-    $accum{always_block_cidrs}    = _csv_to_array($accum{always_block_cidrs});
-    $accum{always_block_cidrs_v6} = _csv_to_array($accum{always_block_cidrs_v6});
+    $accum{never_block_cidrs}     = _normalize_cidrs(_csv_to_array($accum{never_block_cidrs}));
+    $accum{never_block_cidrs_v6}  = _normalize_cidrs(_csv_to_array($accum{never_block_cidrs_v6}));
+    $accum{always_block_cidrs}    = _normalize_cidrs(_csv_to_array($accum{always_block_cidrs}));
+    $accum{always_block_cidrs_v6} = _normalize_cidrs(_csv_to_array($accum{always_block_cidrs_v6}));
     $accum{file_sources}          = _csv_to_array($accum{file_sources});
     $accum{public_blocklist_urls} = _csv_to_array($accum{public_blocklist_urls});
 
@@ -812,6 +813,47 @@ sub _csv_to_array {
         $t;
     } split(/\s*,\s*/, $s);
     return \@x;
+}
+
+=head2 _normalize_cidrs
+
+Description:
+    Normalize CIDR entries by ensuring all IP addresses have netmask notation.
+    Bare IPv4 addresses get /32, bare IPv6 addresses get /128.
+    This prevents errors in Net::CIDR::cidrlookup which expects proper CIDR format.
+
+Arguments:
+    $cidrs – arrayref of CIDR strings (may contain bare IPs).
+
+Returns:
+    Arrayref of normalized CIDR strings.
+
+=cut
+
+sub _normalize_cidrs {
+    my ($cidrs) = @_;
+    return [] unless defined $cidrs && ref($cidrs) eq 'ARRAY';
+
+    my @normalized = map {
+        my $entry = $_;
+        # Skip empty entries
+        next unless defined $entry && length($entry);
+
+        # If it already has a slash, it's already a CIDR
+        if ($entry =~ m{/}) {
+            $entry;
+        }
+        # Check if it's an IPv6 address (contains colons)
+        elsif ($entry =~ /:/) {
+            "$entry/128";
+        }
+        # Otherwise treat as IPv4
+        else {
+            "$entry/32";
+        }
+    } @$cidrs;
+
+    return \@normalized;
 }
 
 =head2 _auto_discover_sources
