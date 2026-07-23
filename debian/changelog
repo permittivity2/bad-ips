@@ -1,3 +1,9 @@
+bad-ips (3.6.0) unstable; urgency=medium
+
+  * Release v3.6.0
+
+ -- Gardner <gardner@homelab>  Wed, 22 Jul 2026 22:56:36 -0500
+
 bad-ips (3.5.32) unstable; urgency=medium
 
   * Release v3.5.32

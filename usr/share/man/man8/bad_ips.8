@@ -1,4 +1,4 @@
-.TH BAD_IPS 8 "June 2026" "Bad IPs 3.5.32" "System Administration"
+.TH BAD_IPS 8 "June 2026" "Bad IPs 3.6.0" "System Administration"
 .SH NAME
 bad_ips \- distributed IP blocking system with centralized database
 .SH SYNOPSIS
@@ -97,6 +97,30 @@ to configure PostgreSQL connection:
 .br
 .B db_ssl_mode
 = SSL mode (disable, require, verify-ca, verify-full)
+.RE
+.SS Database Synchronization Control
+Configure how this server interacts with the central database. Enables honeypot mode and one-way data sharing:
+.PP
+.RS
+.B [global]
+.br
+.B sync_blocked_to_database
+= 0 to disable (honeypot/no sync), 1 to enable (default for production)
+.br
+.B block_ips_from_database
+= 0 to disable (honeypot/no pull), 1 to enable (default for production)
+.RE
+.PP
+Deployment modes:
+.RS
+.IP "Honeypot (both=0)"
+Detects and blocks threats locally but operates independently from the central database.
+.IP "Push-Only (sync=1, block=0)"
+Reports threats to database but doesn't pull from other servers.
+.IP "Pull-Only (sync=0, block=1)"
+Leverages collective intelligence but doesn't report own data.
+.IP "Full Sync (both=1)"
+Bidirectional synchronization for distributed threat intelligence.
 .RE
 .SS Database Resilience Configuration
 Optional settings in

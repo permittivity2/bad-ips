@@ -46,6 +46,11 @@ never_block_cidrs = 10.0.0.0/8,192.168.1.0/24,127.0.0.0/8
 
 # Blocking duration
 block_duration = 691200          # 8 days in seconds
+blocking_time = 691200           # TTL for blocked IPs in nftables
+
+# Database synchronization control
+sync_blocked_to_database = 0     # Report local blocks to database (0=no, 1=yes)
+block_ips_from_database = 0      # Pull blocks from database (0=no, 1=yes)
 
 # Automatic detection of services
 auto_mode = 1                    # Automatically detect journal units and log files
@@ -243,6 +248,32 @@ central_db_batch_size = 20
 central_db_queue_timeout = 5
 ```
 
+### Database Synchronization Control
+
+Control how this server interacts with the central database. This enables deployment modes including honeypot servers and one-way data sharing.
+
+```ini
+[global]
+# sync_blocked_to_database: Report locally detected blocks to central database
+#   0 = disabled (honeypot mode - detects but doesn't report)
+#   1 = enabled (default for production servers)
+sync_blocked_to_database = 0
+
+# block_ips_from_database: Pull and block IPs detected by other servers
+#   0 = disabled (honeypot mode - independent blocking)
+#   1 = enabled (default for production servers)
+block_ips_from_database = 0
+```
+
+**Deployment Modes:**
+
+- **Honeypot Mode** (both = 0): Detects and blocks threats locally but operates independently. Perfect for test/staging environments or isolated honeypots.
+- **Push-Only Mode** (sync=1, block=0): Reports threats to database but doesn't pull from other servers. Useful for edge servers that contribute data without trust in other sources.
+- **Pull-Only Mode** (sync=0, block=1): Leverages collective intelligence but doesn't report own data. Useful for compliance or privacy-sensitive systems.
+- **Full Sync Mode** (both = 1): Bidirectional synchronization. Standard production deployment with maximum visibility across all servers.
+
+**Note:** The `central_db_sync` thread always runs regardless of `sync_blocked_to_database` setting to prevent queue memory leaks. When disabled, queued items are drained without being sent to the database.
+
 ### Performance Tuning
 
 ```ini
@@ -275,6 +306,8 @@ nft_set_v6 = badipv6
 
 ## Complete Example Configuration
 
+### Honeypot Mode (Isolated Server)
+
 ```ini
 [global]
 # Required: Never block these networks
@@ -282,7 +315,54 @@ never_block_cidrs = 10.0.0.0/8,192.168.0.0/16,172.16.0.0/12,127.0.0.0/8,169.254.
 
 # Blocking
 block_duration = 691200
+blocking_time = 691200
 auto_mode = 1
+
+# Database synchronization (honeypot mode - no sync)
+sync_blocked_to_database = 0
+block_ips_from_database = 0
+
+# Performance
+sleep_time = 2
+initial_journal_lookback = 86400
+cleanup_every_seconds = 3600
+
+# Database
+db_dir = /var/lib/bad_ips
+db_file = /var/lib/bad_ips/bad_ips.sql
+
+# Nftables
+nft_table = inet
+nft_family_table = filter
+nft_set = badipv4
+
+# Logging
+log_level = INFO
+
+# Public blocklists
+[PublicBlocklistPlugins:Spamhaus]
+urls = https://www.spamhaus.org/drop/drop.txt, https://www.spamhaus.org/drop/edrop.txt
+fetch_interval = 3600
+use_cache = 1
+cache_path = /var/cache/badips/
+active = 1
+```
+
+### Production Mode (Full Database Sync)
+
+```ini
+[global]
+# Required: Never block these networks
+never_block_cidrs = 10.0.0.0/8,192.168.0.0/16,172.16.0.0/12,127.0.0.0/8,169.254.0.0/16,224.0.0.0/4,240.0.0.0/4
+
+# Blocking
+block_duration = 691200
+blocking_time = 691200
+auto_mode = 1
+
+# Database synchronization (full sync)
+sync_blocked_to_database = 1
+block_ips_from_database = 1
 
 # Performance
 sleep_time = 2

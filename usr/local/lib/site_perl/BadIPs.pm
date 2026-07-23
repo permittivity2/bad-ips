@@ -28,7 +28,7 @@ $Data::Dumper::Indent   = 1;
 
 my $log = get_logger("BadIPs") || die "You MUST initialize Log::Log4perl before using BadIPs module";
 
-our $VERSION = '3.5.32';
+our $VERSION = '3.6.0';
 
 # -------------------------------------------------------------------------
 # Shared state for all threads
@@ -777,6 +777,10 @@ sub _load_config {
     $accum{db_retry_interval} //= 3;        # Seconds between retry attempts
     $accum{db_max_retries}    //= 5;        # Maximum number of reconnection attempts
 
+    # Database synchronization control
+    $accum{sync_blocked_to_database}    //= 0;  # Report local blocks to central DB (honeypot mode if 0)
+    $accum{block_ips_from_database}     //= 0;  # Pull and block IPs from central DB (honeypot mode if 0)
+
     # Normalize comma lists
     $accum{journal_units}         = _csv_to_array($accum{journal_units});
     $accum{bad_conn_patterns}     = _csv_to_array($accum{bad_conn_patterns})
@@ -1035,11 +1039,17 @@ Returns:
 sub _start_worker_threads {
     my ($self) = @_;
 
-    my %workers = ( 
+    my %workers = (
         nft_blocker            => \&_worker_nft_blocker,
         central_db_sync        => \&_worker_central_db_sync,
-        pull_global_blocks     => \&_worker_pull_global_blocks,
     );
+
+    # Conditionally add pull_global_blocks thread
+    if ($self->{conf}->{block_ips_from_database}) {
+        $workers{pull_global_blocks} = \&_worker_pull_global_blocks;
+    } else {
+        $log->info("block_ips_from_database is disabled; pull_global_blocks thread will not be started");
+    }
 
     $self->{threads} = [];
 
@@ -1715,6 +1725,12 @@ sub _worker_central_db_sync {
         if ( ! defined $item ) {
             $log->info("central_db_sync_thread: queue appears to have ended, exiting");
             last;
+        }
+
+        # If database sync is disabled, drain the queue but don't process items
+        unless ($conf->{sync_blocked_to_database}) {
+            $log->debug("sync_blocked_to_database is disabled; skipping database update for: " . $item->{ip});
+            next;
         }
 
         # Periodic connection health check (every 60 seconds)

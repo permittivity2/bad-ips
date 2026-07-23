@@ -9,6 +9,15 @@ never_block_cidrs = 127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.
 
 # Blocking duration
 block_duration = 691200          # 8 days in seconds (8 * 24 * 60 * 60)
+blocking_time = 691200           # TTL for blocked IPs in nftables (8 days in seconds)
+
+# Database Synchronization Control
+# sync_blocked_to_database: Report locally blocked IPs to central database (0=no, 1=yes)
+# block_ips_from_database: Block IPs detected by other servers (0=no, 1=yes)
+# Setting both to 0 creates a "honeypot" mode - server detects threats locally
+# but operates independently from the central database
+sync_blocked_to_database = 0
+block_ips_from_database = 0
 
 # Automatic detection of services and log sources
 auto_mode = 1

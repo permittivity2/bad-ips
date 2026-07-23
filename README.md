@@ -1,6 +1,6 @@
 # 🛡️ Bad IPs - Distributed IP Blocking System
 
-[![Version](https://img.shields.io/badge/version-3.5.32-blue.svg)](https://github.com/permittivity2/bad-ips/releases)
+[![Version](https://img.shields.io/badge/version-3.6.0-blue.svg)](https://github.com/permittivity2/bad-ips/releases)
 [![Status](https://img.shields.io/badge/status-ALPHA-red.svg)](https://github.com/permittivity2/bad-ips)
 [![License](https://img.shields.io/badge/license-Proprietary-red.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Debian%20%7C%20Ubuntu-orange.svg)](https://projects.thedude.vip/bad-ips/)
@@ -64,6 +64,11 @@ No worker directly calls another worker. Shutdowns and reloads are coordinated v
 - Blocks detected on one host can be shared with all hosts
 - Uses PostgreSQL as a coordination backend
 - Prevents re-learning the same attackers everywhere
+- **Flexible deployment modes:**
+  - Honeypot mode: Detects and blocks locally without reporting
+  - Push-only: Reports data without consuming others' blocks
+  - Pull-only: Leverages collective intelligence without reporting
+  - Full sync: Bidirectional sharing across the entire fleet
 
 ### Public Blocklist Plugins
 

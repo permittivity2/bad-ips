@@ -191,6 +191,16 @@
                     <td>Max seconds to wait before processing queued IPs (regardless of batch size)</td>
                     <td>5</td>
                 </tr>
+                <tr>
+                    <td><code>sync_blocked_to_database</code></td>
+                    <td>Report locally detected blocks to central database (0=honeypot, 1=normal)</td>
+                    <td>0</td>
+                </tr>
+                <tr>
+                    <td><code>block_ips_from_database</code></td>
+                    <td>Pull and block IPs detected by other servers (0=honeypot, 1=normal)</td>
+                    <td>0</td>
+                </tr>
                 <tr style="opacity: 0.5;">
                     <td><code><del>public_blocklist_urls</del></code></td>
                     <td><del>Comma-separated list of URLs to fetch blocklists from (HTTP/HTTPS/file://)</del><br><span style="color: #ff6b6b; font-weight: bold;">⚠️ DEPRECATED in v3.5+</span> - Use <a href="#plugins">PublicBlocklistPlugins</a> instead</td>
@@ -224,6 +234,11 @@ log_level = debug
 
 # How long to block an IP (seconds)
 block_duration = 691200  # 8 days
+blocking_time = 691200   # TTL for blocked IPs in nftables
+
+# Database synchronization control
+sync_blocked_to_database = 0  # Report local blocks to database (0=honeypot/no, 1=yes)
+block_ips_from_database = 0   # Pull blocks from database (0=honeypot/no, 1=yes)
 
 # Network filtering (IPv4)
 never_block_cidrs = 10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8,169.254.0.0/16,23.116.91.64/29
@@ -789,7 +804,7 @@ sudo nft list set inet filter badipv4</div>
 
     <footer>
         <p><a href="index.html">← Back to Main</a> | <a href="changelog.html">Changelog</a></p>
-        <p>Bad IPs v3.5.32 - Silver Linings, LLC</p>
+        <p>Bad IPs v3.6.0 - Silver Linings, LLC</p>
     </footer>
 </body>
 </html>
