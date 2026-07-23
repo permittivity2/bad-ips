@@ -28,7 +28,7 @@ $Data::Dumper::Indent   = 1;
 
 my $log = get_logger("BadIPs") || die "You MUST initialize Log::Log4perl before using BadIPs module";
 
-our $VERSION = '3.6.0';
+our $VERSION = '3.6.1';
 
 # -------------------------------------------------------------------------
 # Shared state for all threads
@@ -688,7 +688,10 @@ sub _load_config {
                 # Collect patterns from this detector (pattern1, pattern2, etc.)
                 for my $key (sort keys %$d) {
                     if ($key =~ /^pattern\d+$/) {
-                        push @detector_patterns, $d->{$key};
+                        push @detector_patterns, {
+                            name  => $key,
+                            regex => $d->{$key}
+                        };
                     }
                 }
 
@@ -718,7 +721,7 @@ sub _load_config {
     # If detectors provided patterns, override/extend the global bad_conn_patterns
     if (@detector_patterns) {
         my %seen;
-        my @unique_patterns = grep { !$seen{$_}++ } @detector_patterns;
+        my @unique_patterns = grep { !$seen{$_->{regex}}++ } @detector_patterns;
         $accum{bad_conn_patterns} = \@unique_patterns;
         $log->info("Loaded " . scalar(@unique_patterns) . " patterns from detectors") if $log;
     }
@@ -783,8 +786,19 @@ sub _load_config {
 
     # Normalize comma lists
     $accum{journal_units}         = _csv_to_array($accum{journal_units});
-    $accum{bad_conn_patterns}     = _csv_to_array($accum{bad_conn_patterns})
-        unless ref $accum{bad_conn_patterns};
+    unless (ref $accum{bad_conn_patterns}) {
+        my $csv_array = _csv_to_array($accum{bad_conn_patterns});
+        my @wrapped;
+        my $idx = 1;
+        for my $regex (@$csv_array) {
+            push @wrapped, {
+                name  => "pattern$idx",
+                regex => $regex
+            };
+            $idx++;
+        }
+        $accum{bad_conn_patterns} = \@wrapped;
+    }
     $accum{never_block_cidrs}     = _normalize_cidrs(_csv_to_array($accum{never_block_cidrs}));
     $accum{never_block_cidrs_v6}  = _normalize_cidrs(_csv_to_array($accum{never_block_cidrs_v6}));
     $accum{always_block_cidrs}    = _normalize_cidrs(_csv_to_array($accum{always_block_cidrs}));
@@ -892,14 +906,14 @@ sub _auto_discover_sources {
 
     # If no auto_mode, just compile patterns and bail
     unless ($conf->{auto_mode}) {
-        my @compiled = map { eval { qr/$_/ } || () } @{$conf->{bad_conn_patterns} || []};
+        my @compiled = map { eval { qr/$_->{regex}/ } || () } @{$conf->{bad_conn_patterns} || []};
         $conf->{compiled_patterns} = \@compiled;
         return;
     }
 
     # Basic behavior: we will just compile bad_conn_patterns and keep
     # journal_units / file_sources from config.
-    my @compiled = map { eval { qr/$_/ } || () } @{$conf->{bad_conn_patterns} || []};
+    my @compiled = map { eval { qr/$_->{regex}/ } || () } @{$conf->{bad_conn_patterns} || []};
     $conf->{compiled_patterns} = \@compiled;
 
     # If nothing is configured, default to "ssh"
@@ -2733,7 +2747,7 @@ sub _bad_entries {
 
     my $patterns = $self->{conf}->{compiled_patterns}
         ? $self->{conf}->{compiled_patterns}
-        : [ map { qr/$_/ } @{$self->{conf}->{bad_conn_patterns} || []} ];
+        : [ map { qr/$_->{regex}/ } @{$self->{conf}->{bad_conn_patterns} || []} ];
 
     my $total_entries = 0;
     for my $unit (keys %$entries) {
@@ -2749,16 +2763,19 @@ sub _bad_entries {
             for my $re (@$patterns) {
                 $pattern_num++;
                 if ($msg =~ $re) {
-                    my $pattern = $self->{conf}->{bad_conn_patterns}->[$pattern_num - 1] || 'unknown';
+                    my $pattern_meta = $self->{conf}->{bad_conn_patterns}->[$pattern_num - 1];
+                    my $pattern_name = $pattern_meta->{name}  || "pattern$pattern_num";
+                    my $pattern_regex = $pattern_meta->{regex} || 'unknown';
                     $bad{$pid} = {
-                        msg         => $msg,
-                        unit        => $unit,
-                        pattern_num => $pattern_num,
-                        pattern     => $pattern,
-                        detector    => $self->_detector_name_from_unit($unit),
-                        service     => $self->_service_name_from_unit($unit),
+                        msg          => $msg,
+                        unit         => $unit,
+                        pattern_num  => $pattern_num,
+                        pattern_name => $pattern_name,
+                        pattern      => $pattern_regex,
+                        detector     => $self->_detector_name_from_unit($unit),
+                        service      => $self->_service_name_from_unit($unit),
                     };
-                    $log->debug("Unit $unit matched pattern#$pattern_num: $pattern");
+                    $log->debug("Unit $unit matched $pattern_name: $pattern_regex");
                     $log->debug("Matched log line: " . substr($msg, 0, 100) . (length($msg) > 100 ? "..." : ""));
                     last ENTRY;
                 }
@@ -2870,7 +2887,7 @@ sub _remote_addresses {
                 $ip_metadata{$ip} = {
                     service  => $entry->{service},
                     detector => $entry->{detector},
-                    pattern  => "pattern$entry->{pattern_num}: $entry->{pattern}",
+                    pattern  => "$entry->{pattern_name}: $entry->{pattern}",
                     log_line => $entry->{msg},
                 };
                 $log->debug("Found IP $ip from detector '$entry->{detector}'");
