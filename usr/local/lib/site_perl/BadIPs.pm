@@ -28,7 +28,7 @@ $Data::Dumper::Indent   = 1;
 
 my $log = get_logger("BadIPs") || die "You MUST initialize Log::Log4perl before using BadIPs module";
 
-our $VERSION = '3.5.31';
+our $VERSION = '3.5.32';
 
 # -------------------------------------------------------------------------
 # Shared state for all threads
@@ -719,7 +719,7 @@ sub _load_config {
     if (@detector_patterns) {
         my %seen;
         my @unique_patterns = grep { !$seen{$_}++ } @detector_patterns;
-        $accum{bad_conn_patterns} = join(',', @unique_patterns);
+        $accum{bad_conn_patterns} = \@unique_patterns;
         $log->info("Loaded " . scalar(@unique_patterns) . " patterns from detectors") if $log;
     }
 
@@ -779,7 +779,8 @@ sub _load_config {
 
     # Normalize comma lists
     $accum{journal_units}         = _csv_to_array($accum{journal_units});
-    $accum{bad_conn_patterns}     = _csv_to_array($accum{bad_conn_patterns});
+    $accum{bad_conn_patterns}     = _csv_to_array($accum{bad_conn_patterns})
+        unless ref $accum{bad_conn_patterns};
     $accum{never_block_cidrs}     = _normalize_cidrs(_csv_to_array($accum{never_block_cidrs}));
     $accum{never_block_cidrs_v6}  = _normalize_cidrs(_csv_to_array($accum{never_block_cidrs_v6}));
     $accum{always_block_cidrs}    = _normalize_cidrs(_csv_to_array($accum{always_block_cidrs}));
