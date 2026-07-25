@@ -54,8 +54,8 @@ to configure:
 .B log_level
 = debug | info | warn | error
 .br
-.B block_duration
-= seconds to block IPs (default: 691200 = 8 days)
+.B blocking_time
+= seconds to block IPs in nftables (default: 691200 = 8 days). Note: the config template also sets \fBblock_duration\fR which is a legacy alias ignored by the daemon \(em use \fBblocking_time\fR.
 .br
 .B never_block_cidrs
 = comma-separated list of trusted IPv4 network CIDRs
@@ -140,28 +140,235 @@ Specifies the base delay for exponential backoff. Worker threads wait this many 
 .br
 When a database operation fails, the system attempts to reconnect up to this many times before requeueing the operation. Each attempt includes a backoff delay. After exhausting retries, the operation is requeued and the thread continues operating (local IP blocking continues uninterrupted). Increase this value for unreliable networks or slow database startup, decrease for faster failure detection.
 .RE
+.SS Performance and Timing
+Optional tuning settings in
+.I /usr/local/etc/badips.conf:
+.PP
+.RS
+.B [global]
+.br
+.B sleep_time
+= seconds between main loop iterations (default: 2)
+.br
+.B heartbeat
+= seconds between heartbeat log messages; also triggers nftables infrastructure re-verification (default: 60)
+.br
+.B initial_journal_lookback
+= how far back in seconds to read the journal on startup or reload (default: 300; template sets 86400 for a 24-hour lookback)
+.br
+.B graceful_shutdown_timeout
+= maximum seconds to wait for worker threads to exit on shutdown or SIGHUP reload (default: 15; systemd TimeoutStopSec is separate and defaults to 300)
+.RE
+.SS Log Sources
+Direct control over which systemd units and log files the main thread monitors (in addition to or instead of detectors):
+.PP
+.RS
+.B [global]
+.br
+.B journal_units
+= comma-separated systemd unit names to read from journald (default: \fIssh\fR)
+.br
+.B file_sources
+= comma-separated log file paths to tail (default: empty)
+.br
+.B max_file_tail_lines
+= maximum lines read backwards per file source per main loop iteration (default: 2000)
+.RE
+.PP
+Note: detector and plugin sections are the preferred way to define sources; these global keys provide a lower-level override.
+.SS nftables Naming
+These keys control the names of the nftables table and sets managed by Bad IPs. They must match the infrastructure created by
+.B bad_ips_installer.sh
+and should not normally be changed:
+.PP
+.RS
+.B [global]
+.br
+.B nft_table
+= nftables address family (default: \fIinet\fR)
+.br
+.B nft_family_table
+= nftables table name (default: \fIbadips\fR)
+.br
+.B nft_set
+= name of the nftables set for dynamically blocked IPv4 addresses (default: \fIbadipv4\fR)
+.RE
+.SS Per-Host Configuration Overrides
+Any option in
+.B [global]
+can be overridden for a specific host using a
+.B [host:<shortname>]
+section, where
+.I shortname
+is the first component of the server's hostname (before any dot). This allows a single shared config to be deployed across servers with per-host differences.
+.PP
+Example — increase lookback only on the mail server:
+.PP
+.RS
+.nf
+[host:mail]
+initial_journal_lookback = 172800
+sync_blocked_to_database = 1
+.fi
+.RE
+.SS Failover and Queue Tuning
+Settings that control behavior when the central database is unavailable and how queues are managed:
+.PP
+.RS
+.B [global]
+.br
+.B failover_enabled
+= 1 to write failover events when the DB is unreachable, 0 to disable (default: 1)
+.br
+.B failover_log
+= path to write failover events (default: \fI/var/lib/bad_ips/failover.log\fR)
+.br
+.B sync_to_central_db_queue_max
+= maximum items in the DB-sync queue (default: 10000)
+.br
+.B central_db_batch_size
+= maximum blocked IP records written to PostgreSQL in one batch INSERT (default: 1000)
+.br
+.B central_db_batch_timeout
+= seconds to accumulate a batch before flushing to the DB (default: 5)
+.RE
+.SS Pull Interval Tuning
+Controls how aggressively the
+.B pull_global_blocks
+thread polls the central database for new blocks from other servers. The interval grows when no new blocks are found and shrinks when they are:
+.PP
+.RS
+.B [global]
+.br
+.B pull_initial_interval
+= starting pull interval in seconds on thread startup (default: 20)
+.br
+.B pull_min_interval
+= minimum seconds between pulls; used when new blocks are actively being found (default: 2)
+.br
+.B pull_step_interval
+= seconds added to the pull interval each cycle when no new blocks are found (default: 4)
+.br
+.B pull_max_interval
+= maximum seconds between pulls; interval is capped here (default: 180)
+.RE
 .SS Detector Configuration
 Create detector files in
 .I /usr/local/etc/badips.d/
 with pattern:
 .I NN-name.conf
 .PP
-Example SSH detector
-.RI ( 10-sshd.conf ):
+Each detector section supports these keys:
+.PP
+.RS
+.B units
+= comma-separated systemd unit names to monitor via journald
+.br
+.B files
+= comma-separated log file paths to tail
+.br
+.B pattern1, pattern2, \fR...\fB patternN
+= regex patterns; any match against a log line triggers blocking of the source IP
+.RE
+.PP
+Example Dovecot detector
+.RI ( 30-dovecot.conf ):
 .PP
 .RS
 .nf
-[detector:sshd]
-units = ssh.service, sshd.service
-pattern1 = Failed password for invalid user
-pattern2 = Failed password for root
-pattern3 = Connection closed by authenticating user
+[detector:dovecot]
+units = dovecot.service
+pattern1 = Aborted login
+pattern2 = Auth failed
+pattern3 = Invalid user
+.fi
+.RE
+.PP
+Example nginx detector using both journald and log files
+.RI ( 40-nginx.conf ):
+.PP
+.RS
+.nf
+[detector:nginx]
+units = nginx.service
+files = /var/log/nginx/error.log, /var/log/nginx/access.log
+pattern1 = SSL_CTX_use_certificate_file
+pattern2 = invalid host in upstream
 .fi
 .RE
 .SS Plugin Configuration
 .B Bad IPs
-supports dedicated plugins for sophisticated attack detection beyond simple pattern matching. Plugins run in separate threads and can maintain internal state, implement thresholds, and apply custom blocking strategies.
+supports dedicated plugins for sophisticated attack detection beyond simple pattern matching. Plugins run in separate threads and can maintain internal state, implement thresholds, and apply custom blocking strategies. All plugin sections require
+.B active = 1
+to be loaded.
 .PP
+.SS GeneralLogMonitor Plugin (SSH)
+The
+.B GeneralLogMonitor
+plugin is a flexible log watcher that can monitor both journald and log files. The SSH detector
+.RI ( 10-sshd.conf )
+uses this plugin. Multiple instances can be configured by using different section names
+(e.g.
+.B [Plugins:GeneralLogMonitor]
+or
+.B [Plugins:SSH]
+).
+.PP
+.B All available keys:
+.RS
+.B active
+= 1 to enable this plugin instance
+.br
+.B name
+= display name used in logs and database records
+.br
+.B monitor_method
+= how to monitor logs: \fIjournald\fR, \fIfiles\fR, \fIboth\fR, or \fIauto\fR (default: \fIauto\fR \(em uses journald if entries are found, falls back to file monitoring)
+.br
+.B journal_unit
+= comma-separated systemd unit names to monitor via journald
+.br
+.B log_paths
+= comma-separated log file paths to monitor
+.br
+.B initial_fetch
+= seconds of journal/file history to read on startup (default: 300)
+.br
+.B fetch_interval
+= seconds between polling cycles (default: 60)
+.br
+.B use_cache
+= 1 to cache the log file position between fetches (default: 1)
+.br
+.B block_after_n_attempts
+= number of pattern matches from a single IP before blocking (default: 1)
+.br
+.B block_duration
+= how long in seconds to block a detected IP (default: inherits global \fBblocking_time\fR)
+.br
+.B bad_login_pattern_01, bad_login_pattern_02, \fR...\fB bad_login_pattern_NN
+= detection patterns. Format: \fIShort Description:::Regex\fR. The description is used in logs; the regex is matched against each log line. IP is extracted from the line after a match.
+.RE
+.PP
+.B Configuration Example
+.RI ( 10-sshd.conf ):
+.PP
+.RS
+.nf
+[Plugins:GeneralLogMonitor]
+active = 1
+name = SSH
+monitor_method = auto
+journal_unit = ssh.service, sshd.service
+log_paths = /var/log/auth.log, /var/log/secure
+initial_fetch = 7200
+fetch_interval = 2
+block_after_n_attempts = 1
+bad_login_pattern_01 = Failed password:::Failed password for .* from
+bad_login_pattern_02 = Invalid user:::Invalid user .* from
+bad_login_pattern_03 = Preauth closed:::Connection closed by .* \e[preauth\e]
+.fi
+.RE
 .SS Postfix Plugin
 The
 .B Postfix
@@ -171,13 +378,70 @@ plugin monitors Postfix logs for authentication failures and protocol violations
 .B Key Features:
 .RS
 .B "Username-Based Attack Detection:"
-Detects distributed brute force attacks by tracking failed authentication attempts targeting the same email address from multiple IP addresses. When 3+ attempts to the same username occur within 10 minutes, all attacking IPs are blocked with escalating durations.
+Detects distributed brute force attacks by tracking failed authentication attempts targeting the same email address from multiple IP addresses. When the configured number of attempts to the same username occur within the window, all attacking IPs are blocked with escalating durations.
 .br
 .B "Protocol Violation Blocking:"
 Immediately blocks IPs sending non-SMTP commands, improper pipelining, or other protocol violations.
 .br
 .B "Escalating Block Durations:"
-First offense blocks for 10 minutes, subsequent offenses escalate to 1 hour, 6 hours, 24 hours, and 7 days maximum. Offense counters reset after 30 days of good behavior.
+Block duration increases with each repeat offense, from 10 minutes up to 7 days. Offense counters reset after 30 days of good behavior.
+.RE
+.PP
+.B All available keys:
+.RS
+.B active
+= 1 to enable the plugin
+.br
+.B name
+= display name used in logs
+.br
+.B journal_unit
+= comma-separated systemd unit names to monitor (default: \fIpostfix@-.service, postfix.service\fR)
+.br
+.B fetch_interval
+= seconds between journal polls (default: 5)
+.br
+.B initial_fetch
+= seconds of journal history to read on startup (default: 3600)
+.br
+.B cleanup_interval
+= seconds between internal cleanup runs that expire old tracking state (default: 300)
+.PP
+.I Threshold pairs (count + window in seconds):
+.br
+.B protocol_violations_count / protocol_violations_window
+= per-IP: trigger immediate block after this many non-SMTP commands within the window (defaults: 1 / 1)
+.br
+.B sasl_failures_count / sasl_failures_window
+= per-username: block all IPs attacking the same account after this many SASL failures within the window (defaults: 3 / 600)
+.br
+.B relay_denials_count / relay_denials_window
+= per-IP: block after this many relay access denials within the window (defaults: 2 / 300)
+.br
+.B ssl_errors_count / ssl_errors_window
+= per-IP: threshold for SSL errors; tracking only by default (defaults: 5 / 600)
+.PP
+.I Escalating block durations (TTL in seconds):
+.br
+.B escalation_ttl_1
+= block duration for 1st offense (default: 600 = 10 minutes)
+.br
+.B escalation_ttl_2
+= block duration for 2nd offense (default: 3600 = 1 hour)
+.br
+.B escalation_ttl_3
+= block duration for 3rd offense (default: 21600 = 6 hours)
+.br
+.B escalation_ttl_4
+= block duration for 4th offense (default: 86400 = 24 hours)
+.br
+.B escalation_ttl_5
+= block duration for 5th and subsequent offenses (default: 604800 = 7 days)
+.PP
+.I Pattern definitions:
+.br
+.B pattern_<category>_NN
+= detection patterns for a specific category. Format: \fIDescription:::Regex\fR. Categories are \fIprotocol_violations\fR, \fIsasl_failures\fR, \fIrelay_denials\fR, \fIssl_errors\fR. Example key: \fBpattern_sasl_failures_01\fR.
 .RE
 .PP
 .B Configuration Example:
@@ -185,11 +449,78 @@ First offense blocks for 10 minutes, subsequent offenses escalate to 1 hour, 6 h
 .nf
 [Plugins:Postfix]
 active = 1
+journal_unit = postfix@-.service, postfix.service
+fetch_interval = 5
+initial_fetch = 3600
+cleanup_interval = 300
+
+protocol_violations_count = 1
+protocol_violations_window = 1
 sasl_failures_count = 3
 sasl_failures_window = 600
+relay_denials_count = 2
+relay_denials_window = 300
+
 escalation_ttl_1 = 600
 escalation_ttl_2 = 3600
 escalation_ttl_3 = 21600
+escalation_ttl_4 = 86400
+escalation_ttl_5 = 604800
+
+pattern_protocol_violations_01 = Non-SMTP command:::non-SMTP command from
+pattern_protocol_violations_02 = Improper pipelining:::improper command pipelining after CONNECT from
+pattern_sasl_failures_01 = SASL LOGIN failed:::SASL LOGIN authentication failed
+pattern_sasl_failures_02 = SASL PLAIN failed:::SASL PLAIN authentication failed
+pattern_relay_denials_01 = Relay denied:::Relay access denied
+pattern_ssl_errors_01 = SSL accept error:::SSL_accept error from
+.fi
+.RE
+.SS Public Blocklist Plugins
+The
+.B PublicBlocklistPlugins
+section type activates plugins that fetch and apply external IP blocklists. Each instance is a separate section named
+.B [PublicBlocklistPlugins:<Name>]
+where
+.I Name
+is an arbitrary identifier. The built-in Spamhaus plugin is enabled by default in
+.I /usr/local/etc/badips.d/80-publicblocklists.conf.
+.PP
+.B All available keys:
+.RS
+.B active
+= 1 to enable this plugin instance, 0 to disable (required)
+.br
+.B urls
+= comma-separated URLs to fetch IP blocklists from (plain text, one IP/CIDR per line)
+.br
+.B fetch_interval
+= seconds between re-fetches (default: 3600)
+.br
+.B use_cache
+= 1 to cache downloaded files to disk, 0 to always re-fetch (default: 1)
+.br
+.B cache_path
+= directory to store cached blocklist files (default: \fI/var/cache/badips\fR)
+.RE
+.PP
+.B Configuration Example
+.RI ( 80-publicblocklists.conf ):
+.PP
+.RS
+.nf
+[PublicBlocklistPlugins:Spamhaus]
+active = 1
+urls = https://www.spamhaus.org/drop/drop.txt, https://www.spamhaus.org/drop/edrop.txt
+fetch_interval = 3600
+use_cache = 1
+cache_path = /var/cache/badips/
+
+[PublicBlocklistPlugins:Feodotracker]
+active = 0
+urls = https://feodotracker.abuse.ch/downloads/ipblocklist.txt
+fetch_interval = 7200
+use_cache = 1
+cache_path = /var/cache/badips/
 .fi
 .RE
 .SH SYSTEMD INTEGRATION
@@ -306,7 +637,11 @@ Periodically pulls newly blocked IPs from other servers via database
 .SH SIGNALS
 .TP
 .B SIGTERM, SIGINT, SIGQUIT
-Initiate graceful shutdown. Threads are given 300 seconds to drain queues before forced termination.
+Initiate graceful shutdown. Worker threads are given
+.B graceful_shutdown_timeout
+seconds (default: 15) to exit cleanly. The systemd service sets
+.B TimeoutStopSec=300
+so systemd will wait up to 300 seconds before force-killing the process.
 .TP
 .B SIGHUP
 Reload configuration files, detectors, and patterns without restarting the service.
