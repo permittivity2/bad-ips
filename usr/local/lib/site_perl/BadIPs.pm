@@ -28,7 +28,7 @@ $Data::Dumper::Indent   = 1;
 
 my $log = get_logger("BadIPs") || die "You MUST initialize Log::Log4perl before using BadIPs module";
 
-our $VERSION = '3.6.1';
+our $VERSION = '3.6.2';
 
 # -------------------------------------------------------------------------
 # Shared state for all threads
@@ -1032,6 +1032,10 @@ sub _init_queues {
 
     $ips_to_block_queue       = Thread::Queue->new();
     $sync_to_central_db_queue = Thread::Queue->new();
+
+    if (my $max = $self->{conf}->{ips_to_block_queue_max}) {
+        $ips_to_block_queue->limit($max);
+    }
 
     $log->debug("Initialized thread-safe queues");
 }
@@ -2154,7 +2158,8 @@ sub _start_plugins {
                 enqueue_ip        => sub {
                     my (%args) = @_;
                     # Check if queue is full before trying to enqueue, to avoid blocking the plugin thread
-                    if ($ips_to_block_queue->pending() >= $ips_to_block_queue->limit()) {
+                    my $limit = $ips_to_block_queue->limit();
+                    if ($limit && $ips_to_block_queue->pending() >= $limit) {
                         $log->warn("Plugin $plugin attempted to enqueue IP but queue is full; dropping item: " . ($args{ip} || 'unknown IP'));
                         $log->warn("Removing oldest item from queue to make space");
                         my $removed = $ips_to_block_queue->dequeue_nb();

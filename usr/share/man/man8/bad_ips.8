@@ -1,4 +1,4 @@
-.TH BAD_IPS 8 "June 2026" "Bad IPs 3.6.1" "System Administration"
+.TH BAD_IPS 8 "June 2026" "Bad IPs 3.6.2" "System Administration"
 .SH NAME
 bad_ips \- distributed IP blocking system with centralized database
 .SH SYNOPSIS
@@ -225,6 +225,9 @@ Settings that control behavior when the central database is unavailable and how 
 .br
 .B sync_to_central_db_queue_max
 = maximum items in the DB-sync queue (default: 10000)
+.br
+.B ips_to_block_queue_max
+= maximum items in the pending-block queue shared by all detector and public blocklist plugins (default: 5000). Once this limit is reached, the oldest queued item is dropped to make room for new detections; increase this if bursts from public blocklist plugins are large enough to be evicted by concurrent log-monitor traffic before the nftables worker can drain them.
 .br
 .B central_db_batch_size
 = maximum blocked IP records written to PostgreSQL in one batch INSERT (default: 1000)
