@@ -138,6 +138,16 @@ NFTCONFIG
 chmod 644 "$BADIPS_NFT"
 echo "  ✓ Written $BADIPS_NFT"
 
+# Flush the chain's rules before reloading, if it already exists. The
+# rules in $BADIPS_NFT are declarative "add rule" statements, which
+# nftables appends rather than deduplicates - re-running this script
+# (e.g. on every package upgrade via postinst) would otherwise keep
+# piling up duplicate copies of the same rules on every run.
+if check_chain_exists; then
+    echo "  Flushing existing preroute_block chain rules before reload..."
+    nft flush chain inet badips preroute_block 2>&1 || true
+fi
+
 # Load the persistent configuration to create the infrastructure
 echo "  Loading persistent configuration to create infrastructure..."
 if nft -f "$BADIPS_NFT" 2>&1; then
