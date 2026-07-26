@@ -1479,7 +1479,7 @@ Arguments:
     %args:
         item    => hashref with keys:
                         ip         => 'x.x.x.x',
-        blocked => hashref of already blocked IPs in this thread
+        blocked => hashref of ip => expiry-epoch for IPs blocked in this thread
 Returns:
     1 if the IP should be skipped, 0 otherwise.
 =cut
@@ -1500,11 +1500,13 @@ sub _should_skip_ip {
     if (_is_never_block_ip(ip => $ip, conf => $conf)) {
         $log->debug("Skipping IP $ip: in never_block_cidrs");
         return 1;
-    }    
+    }
 
-    # Already blocked in this thread?
-    if (exists $blocked->{$ip}) {
-        $log->debug("Skipping IP $ip: already blocked in this thread");
+    # Already blocked in this thread, and block hasn't expired yet?
+    if (exists $blocked->{$ip} && $blocked->{$ip} > time()) {
+        my $expires_at = strftime("%Y-%m-%d %H:%M:%S", localtime($blocked->{$ip}));
+        my $seconds_left = $blocked->{$ip} - time();
+        $log->debug("Skipping IP $ip: already blocked in this thread until $expires_at ($seconds_left seconds from now)");
         return 1;
     }
 
