@@ -1431,7 +1431,7 @@ sub _worker_nft_blocker {
             && $item->{set}->{name}
             && $item->{set}->{name} eq $set;
         for my $elem (@{$item->{set}->{elem} || []}) {
-            my $ip      = $elem->{elem}->{val};
+            my $ip      = _nft_elem_val_to_str($elem->{elem}->{val});
             my $expires = $elem->{elem}->{expires} + time();
             $blocked_in_thread{$ip} = $expires;
         }
@@ -2291,13 +2291,39 @@ sub _initial_load_blocked_ips {
             && $item->{set}->{name} eq $self->{conf}->{nft_set};
 
         for my $elem (@{$item->{set}->{elem} || []}) {
-            my $ip      = $elem->{elem}->{val};
+            my $ip      = _nft_elem_val_to_str($elem->{elem}->{val});
             my $expires = $elem->{elem}->{expires} + time();
             $self->{blocked}{$ip} = $expires;
         }
     }
 
     $log->info("Loaded " . scalar(keys %{$self->{blocked}}) . " IP(s) from existing nftables set");
+}
+
+=head2 _nft_elem_val_to_str
+
+Description:
+    Stringify an nftables JSON element value. Single-host elements are
+    plain strings; CIDR/range elements in interval sets are represented
+    as a { prefix => { addr => ..., len => ... } } hashref instead, which
+    must be converted to "addr/len" before use as a hash key or log
+    string (otherwise it stringifies as an opaque "HASH(0x...)").
+
+Arguments:
+    $val => the raw value from elem.elem.val (string or hashref)
+
+Returns:
+    String representation of the value.
+
+=cut
+
+sub _nft_elem_val_to_str {
+    my ($val) = @_;
+    return $val unless ref $val;
+    if (ref $val eq 'HASH' && $val->{prefix}) {
+        return "$val->{prefix}{addr}/$val->{prefix}{len}";
+    }
+    return "$val";
 }
 
 =head2 _nft_as_json
