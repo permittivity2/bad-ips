@@ -675,6 +675,14 @@ sub _load_config {
                 my $d = $c->{$section};
                 $log->debug("Processing detector section: $section with full dump: " . Dumper($d));
 
+                # active defaults to enabled for backward compatibility with
+                # existing configs that never set this key; only an explicit
+                # active = 0 disables the detector.
+                if (exists $d->{active} && !$d->{active}) {
+                    $log->info("Detector $detector_name is not active; skipping") if $log;
+                    next;
+                }
+
                 # Collect units from this detector
                 if ($d->{units}) {
                     push @detector_units, split(/\s*,\s*/, $d->{units});
