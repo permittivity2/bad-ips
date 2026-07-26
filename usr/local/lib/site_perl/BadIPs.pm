@@ -1421,9 +1421,24 @@ sub _worker_nft_blocker {
         dry_run      => $dry_run,
     );
 
+    # Seed the local cache from the real nftables state so a service
+    # restart doesn't forget about blocks that are still live in the
+    # kernel, which would otherwise cause a redundant re-add.
     my %blocked_in_thread;
+    my $seed_json = $nft->ruleset_as_json();
+    for my $item (@{$seed_json->{nftables} || []}) {
+        next unless $item->{set}
+            && $item->{set}->{name}
+            && $item->{set}->{name} eq $set;
+        for my $elem (@{$item->{set}->{elem} || []}) {
+            my $ip      = $elem->{elem}->{val};
+            my $expires = $elem->{elem}->{expires} + time();
+            $blocked_in_thread{$ip} = $expires;
+        }
+    }
 
     $log->info("nft_blocker_thread started (table=$fam, family_table=$tab, set=$set, ttl=$ttl)");
+    $log->info("nft_blocker_thread: seeded " . scalar(keys %blocked_in_thread) . " already-blocked IP(s) from nftables");
 
     while (1) {
         my $item = $ips_to_block_queue->dequeue();
