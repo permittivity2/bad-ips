@@ -1,7 +1,10 @@
 ./usr/local/sbin/bad_ips
 ./usr/local/sbin/bad_ips_installer.sh
+./usr/local/sbin/bad_ips_nft
 ./usr/local/lib/site_perl/BadIPs.pm
 ./usr/local/lib/site_perl/BadIPs
+./usr/local/etc/badips.conf.template
+./usr/local/etc/badips/log4perl.conf
 ./usr/local/etc/badips.d/10-sshd.conf
 ./usr/local/etc/badips.d/20-postfix.conf
 ./usr/local/etc/badips.d/30-dovecot.conf
@@ -9,12 +12,17 @@
 ./usr/local/etc/badips.d/50-apache.conf
 ./usr/local/etc/badips.d/70-bind.conf
 ./usr/local/etc/badips.d/80-publicblocklists.conf
+./usr/local/share/bad_ips/reconfigure-user.sh
 ./etc/systemd/system/bad_ips.service
+./etc/logrotate.d/bad_ips
 ./scripts/migrate_database_v2.pl
 ./usr/local/sbin/bad_ips
 ./usr/local/sbin/bad_ips_installer.sh
+./usr/local/sbin/bad_ips_nft
 ./usr/local/lib/site_perl/BadIPs.pm
 ./usr/local/lib/site_perl/BadIPs
+./usr/local/etc/badips.conf.template
+./usr/local/etc/badips/log4perl.conf
 ./usr/local/etc/badips.d/10-sshd.conf
 ./usr/local/etc/badips.d/20-postfix.conf
 ./usr/local/etc/badips.d/30-dovecot.conf
@@ -22,5 +30,7 @@
 ./usr/local/etc/badips.d/50-apache.conf
 ./usr/local/etc/badips.d/70-bind.conf
 ./usr/local/etc/badips.d/80-publicblocklists.conf
+./usr/local/share/bad_ips/reconfigure-user.sh
 ./etc/systemd/system/bad_ips.service
+./etc/logrotate.d/bad_ips
 ./scripts/migrate_database_v2.pl
