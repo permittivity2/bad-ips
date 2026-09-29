@@ -399,9 +399,9 @@ sub _verify_nftables_infrastructure {
 
     $log->info("Verifying nftables infrastructure...");
 
-    # Use existing sudo permission to get ruleset as JSON
-    my $json_output = `sudo nft -j list ruleset 2>&1`;
-    if ($? != 0) {
+    # Query the ruleset through the privileged helper (see BadIPs::NFT)
+    my ($json_output, $rc) = $self->{nft}->ruleset_json_raw();
+    if ($rc != 0) {
         $log->fatal("Failed to query nftables ruleset");
         $log->fatal("Error: $json_output");
         die "Cannot access nftables. Ensure nftables is installed and running.\n";
@@ -1067,8 +1067,16 @@ sub _start_worker_threads {
 
     my %workers = (
         nft_blocker            => \&_worker_nft_blocker,
-        central_db_sync        => \&_worker_central_db_sync,
     );
+
+    # Conditionally add central_db_sync thread. Without it running, nothing
+    # consumes sync_to_central_db_queue, so _worker_nft_blocker only enqueues
+    # when sync_blocked_to_database is enabled (see there).
+    if ($self->{conf}->{sync_blocked_to_database}) {
+        $workers{central_db_sync} = \&_worker_central_db_sync;
+    } else {
+        $log->info("sync_blocked_to_database is disabled; central_db_sync thread will not be started");
+    }
 
     # Conditionally add pull_global_blocks thread
     if ($self->{conf}->{block_ips_from_database}) {
@@ -1482,7 +1490,8 @@ sub _worker_nft_blocker {
         if ($res->{ok}) {
             $log->debug("Block item: " . Dumper($item));
             $blocked_in_thread{$item->{ip}} = $res->{expires};
-            _enqueue_central_db_update(item => $item, expires => $res->{expires}); # Pretty much fire-and-forget
+            _enqueue_central_db_update(item => $item, expires => $res->{expires}) # Pretty much fire-and-forget
+                if $conf->{sync_blocked_to_database};
         } else {
             $log->debug("NFT block failed but this is probably not an actual error for $item->{ip}: $res->{err}");
         }

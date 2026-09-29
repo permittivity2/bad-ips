@@ -139,30 +139,26 @@ echo -e "${GREEN}✓${NC} Configuration files ownership updated"
 
 # 6. Update sudoers configuration
 echo "→ Updating sudoers configuration..."
-cat > /etc/sudoers.d/bad_ips <<SUDOEOF
+SUDOERS_TMP=$(mktemp /etc/sudoers.d/.bad_ips.XXXXXX)
+cat > "$SUDOERS_TMP" <<SUDOEOF
 # Bad IPs sudoers configuration
-# Allows $NEW_USER user to manage the inet badips nftables table
-# Created by bad-ips package installation
+# Allows $NEW_USER to manage the elements of the inet badips nftables sets
+# through the argument-validating helper /usr/local/sbin/bad_ips_nft
+# Created by bad-ips reconfigure-user.sh
 # DO NOT EDIT - Changes will be overwritten on package upgrade
 
-# Command aliases for allowed nft operations
-Cmnd_Alias NFT_BADIPS_ADD = /usr/sbin/nft add element inet badips * *
-Cmnd_Alias NFT_BADIPS_FLUSH = /usr/sbin/nft flush set inet badips never_block*, \\
-                              /usr/sbin/nft flush set inet badips always_block*
-Cmnd_Alias NFT_BADIPS_LIST = /usr/sbin/nft -j list ruleset, \\
-                             /usr/sbin/nft list ruleset
-
-# Allow $NEW_USER user to run these commands without password
-$NEW_USER ALL=(root) NOPASSWD: NFT_BADIPS_ADD, NFT_BADIPS_FLUSH, NFT_BADIPS_LIST
+$NEW_USER ALL=(root) NOPASSWD: /usr/local/sbin/bad_ips_nft
 SUDOEOF
 
-chmod 0440 /etc/sudoers.d/bad_ips
+chmod 0440 "$SUDOERS_TMP"
 
-# Validate sudoers syntax
-if ! visudo -c -f /etc/sudoers.d/bad_ips >/dev/null 2>&1; then
+# Validate sudoers syntax before installing it
+if ! visudo -c -f "$SUDOERS_TMP" >/dev/null 2>&1; then
+    rm -f "$SUDOERS_TMP"
     echo -e "${RED}✗${NC} Invalid sudoers syntax"
     exit 1
 fi
+mv -f "$SUDOERS_TMP" /etc/sudoers.d/bad_ips
 echo -e "${GREEN}✓${NC} Sudoers configuration updated and validated"
 
 # 7. Update systemd drop-in

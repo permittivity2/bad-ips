@@ -4,3 +4,4 @@
 /usr/local/etc/badips.d/40-nginx.conf
 /usr/local/etc/badips.d/50-apache.conf
 /usr/local/etc/badips.d/70-bind.conf
+/usr/local/etc/badips/log4perl.conf

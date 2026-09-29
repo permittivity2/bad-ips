@@ -31,21 +31,18 @@ fi
 
 # Clean up nftables configuration on remove/purge
 if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
-    # Remove Bad IPs nftables configuration
+    # Remove Bad IPs nftables configuration and its live table. Deleting
+    # just our table leaves the rest of the host firewall untouched (a
+    # "systemctl reload nftables" would also drop any runtime-added rules).
     rm -f /etc/nftables.d/99-badips.nft
-
-    # Reload nftables to remove our rules (if service is active)
-    if systemctl is-active --quiet nftables.service; then
-        systemctl reload nftables.service || true
-        echo "Removed Bad IPs nftables rules"
+    if nft list table inet badips >/dev/null 2>&1; then
+        nft delete table inet badips || true
+        echo "Removed Bad IPs nftables table (inet badips)"
     fi
 
-    # IMPORTANT: We intentionally leave these items in place:
-    # - /etc/nftables.d/ directory (may be used by other packages)
-    # - include statement in /etc/nftables.conf (may be used by other packages)
-
-    echo "Note: /etc/nftables.d/ directory and include statement in /etc/nftables.conf"
-    echo "      have been left in place as they may be used by other packages."
+    # IMPORTANT: We intentionally leave the /etc/nftables.d/ directory and
+    # the include statement in /etc/nftables.conf in place, as they may be
+    # used by other packages.
 fi
 
 exit 0

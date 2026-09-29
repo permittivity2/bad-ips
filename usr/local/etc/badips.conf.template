@@ -4,12 +4,16 @@
 [global]
 # CRITICAL: never_block_cidrs MUST be defined!
 # Add your trusted networks, management IPs, and private networks here
+# NOTE: comments must be on their own line; "key = value # comment" makes the
+# comment part of the value.
 # WARNING: Failure to set this correctly could lock you out!
 never_block_cidrs = 127.0.0.0/8,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,169.254.0.0/16,224.0.0.0/4,240.0.0.0/4,0.0.0.0/8
 
 # Blocking duration
-block_duration = 691200          # 8 days in seconds (8 * 24 * 60 * 60)
-blocking_time = 691200           # TTL for blocked IPs in nftables (8 days in seconds)
+# 8 days in seconds (8 * 24 * 60 * 60)
+block_duration = 691200
+# TTL for blocked IPs in nftables (8 days in seconds)
+blocking_time = 691200
 
 # Database Synchronization Control
 # sync_blocked_to_database: Report locally blocked IPs to central database (0=no, 1=yes)
@@ -23,9 +27,12 @@ block_ips_from_database = 0
 auto_mode = 1
 
 # Performance settings
-sleep_time = 2                   # Seconds between log checks
-initial_journal_lookback = 86400 # How far back to check journal on startup (24 hours)
-cleanup_every_seconds = 3600     # Cleanup interval
+# Seconds between log checks
+sleep_time = 2
+# How far back to check journal on startup (24 hours)
+initial_journal_lookback = 86400
+# Cleanup interval
+cleanup_every_seconds = 3600
 
 # Database settings
 db_dir = /var/lib/bad_ips

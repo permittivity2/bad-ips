@@ -148,6 +148,67 @@ chown -R "$BADIPS_USER:$BADIPS_GROUP" /var/cache/badips
 chmod 755 /var/cache/badips
 
 # ============================================================================
+# 3.5. Create the main configuration on first install
+# ============================================================================
+# A fresh install must "just work": create badips.conf from the template
+# (standalone mode: no central database) and protect the admins' own IPs.
+#
+# The SSH detector blocks on the first "Connection closed ... [preauth]",
+# which ssh clients offering several keys, ssh-copy-id, etc. routinely
+# produce, so without this the admin installing the package would likely
+# block themselves within seconds of the service starting.
+CONF_MAIN=/usr/local/etc/badips.conf
+CONF_TEMPLATE=/usr/local/etc/badips.conf.template
+CREATED_CONFIG=0
+
+# Print the IPs of current SSH sessions and of recent successful SSH logins
+detect_admin_ips() {
+    {
+        who 2>/dev/null | sed -n 's/.*(\([^)]*\)).*/\1/p'
+        if command -v journalctl >/dev/null 2>&1; then
+            journalctl --no-pager -q -o cat --since "-30 days" \
+                -t sshd -t sshd-session 2>/dev/null |
+                sed -n 's/.*Accepted [^ ]* for [^ ]* from \([^ ]*\) port .*/\1/p'
+        fi
+        cat /var/log/auth.log /var/log/secure 2>/dev/null |
+            sed -n 's/.*Accepted [^ ]* for [^ ]* from \([^ ]*\) port .*/\1/p'
+    } | sed 's/%.*//' | sort -u
+}
+
+if [ ! -f "$CONF_MAIN" ] && [ -f "$CONF_TEMPLATE" ]; then
+    echo "Creating $CONF_MAIN from template (standalone mode)..."
+    ADMIN_V4=""
+    ADMIN_V6=""
+    for ip in $(detect_admin_ips); do
+        if [[ "$ip" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; then
+            ADMIN_V4="$ADMIN_V4,$ip/32"
+        elif [[ "$ip" =~ ^[0-9A-Fa-f:]+$ && "$ip" == *:* ]]; then
+            ADMIN_V6="$ADMIN_V6,$ip/128"
+        fi
+    done
+
+    TMP_CONF=$(mktemp "$CONF_MAIN.XXXXXX")
+    cp "$CONF_TEMPLATE" "$TMP_CONF"
+    if [ -n "$ADMIN_V4" ]; then
+        sed -i "s|^\(never_block_cidrs = .*\)$|# Admin IPs detected at install time (SSH sessions / recent logins) were appended\n\1$ADMIN_V4|" "$TMP_CONF"
+    fi
+    if [ -n "$ADMIN_V6" ]; then
+        sed -i "s|^\(never_block_cidrs_v6 = .*\)$|\1$ADMIN_V6|" "$TMP_CONF"
+    fi
+    chmod 640 "$TMP_CONF"
+    chown root:"$BADIPS_GROUP" "$TMP_CONF"
+    mv "$TMP_CONF" "$CONF_MAIN"
+    CREATED_CONFIG=1
+
+    echo "✓ Created $CONF_MAIN"
+    if [ -n "$ADMIN_V4$ADMIN_V6" ]; then
+        echo "  Added admin IPs to never_block: $(echo "${ADMIN_V4}${ADMIN_V6}" | sed 's/^,//')"
+    else
+        echo "  WARNING: no admin SSH IPs detected; add your trusted IPs to never_block_cidrs"
+    fi
+fi
+
+# ============================================================================
 # 4. Secure configuration files (contain database passwords)
 # ============================================================================
 # Main config file - allow service user to read (root-owned)
@@ -193,29 +254,32 @@ echo "✓ Application file permissions configured"
 # ============================================================================
 # 5. Create sudoers configuration for nftables access
 # ============================================================================
+# The service user may run ONLY the bad_ips_nft helper, which validates its
+# arguments and can only add/flush elements of the inet badips sets.
+# (Wildcard rules on nft itself are unsafe: nft treats ';' in its arguments
+# as a command separator, so "nft add element inet badips *" allowed any
+# nft command, e.g. "... \; flush ruleset".)
 echo "Creating sudoers configuration for $BADIPS_USER..."
 
-cat > /etc/sudoers.d/bad_ips <<SUDOEOF
+SUDOERS_TMP=$(mktemp /etc/sudoers.d/.bad_ips.XXXXXX)
+cat > "$SUDOERS_TMP" <<SUDOEOF
 # Bad IPs sudoers configuration
-# Allows $BADIPS_USER user to manage the inet badips nftables table
+# Allows $BADIPS_USER to manage the elements of the inet badips nftables sets
+# through the argument-validating helper /usr/local/sbin/bad_ips_nft
 # Created by bad-ips package installation
 # DO NOT EDIT - Changes will be overwritten on package upgrade
 
-# Allow $BADIPS_USER user to run nft commands for the badips table
-# Note: Wildcards must be at the end of command specifications in sudoers
-$BADIPS_USER ALL=(root) NOPASSWD: /usr/sbin/nft add element inet badips *, /usr/sbin/nft flush set inet badips *, /usr/sbin/nft -j list ruleset, /usr/sbin/nft list ruleset
+$BADIPS_USER ALL=(root) NOPASSWD: /usr/local/sbin/bad_ips_nft
 SUDOEOF
+chmod 0440 "$SUDOERS_TMP"
 
-# Set correct permissions on sudoers file
-chmod 0440 /etc/sudoers.d/bad_ips
-
-# Validate sudoers syntax
-if ! visudo -c -f /etc/sudoers.d/bad_ips >/dev/null 2>&1; then
-    echo "ERROR: Invalid sudoers syntax in /etc/sudoers.d/bad_ips"
-    echo "Removing invalid file to prevent system issues"
-    rm -f /etc/sudoers.d/bad_ips
+# Validate sudoers syntax before installing it
+if ! visudo -c -f "$SUDOERS_TMP" >/dev/null 2>&1; then
+    rm -f "$SUDOERS_TMP"
+    echo "ERROR: Invalid sudoers syntax for /etc/sudoers.d/bad_ips"
     exit 1
 fi
+mv -f "$SUDOERS_TMP" /etc/sudoers.d/bad_ips
 
 echo "✓ Sudoers configuration created and validated"
 
@@ -245,22 +309,16 @@ echo "✓ Systemd drop-in configuration created"
 # ============================================================================
 # 6.5. Create nftables infrastructure
 # ============================================================================
+# Only the nftables table/sets/chain here; the service itself is handled at
+# the end of this script. (The service unit also refreshes this on start.)
 echo "Creating nftables infrastructure..."
 
-if [ -f /usr/local/sbin/bad_ips_installer.sh ]; then
-    chmod +x /usr/local/sbin/bad_ips_installer.sh
-
-    if /usr/local/sbin/bad_ips_installer.sh; then
-        echo "✓ nftables infrastructure created successfully"
-    else
-        echo "ERROR: Failed to create nftables infrastructure"
-        echo "You must run manually before starting service:"
-        echo "  sudo /usr/local/sbin/bad_ips_installer.sh"
-        exit 1
-    fi
+if /usr/local/sbin/bad_ips_installer.sh --infra-only; then
+    echo "✓ nftables infrastructure created successfully"
 else
-    echo "WARNING: bad_ips_installer.sh not found"
-    echo "Please ensure nftables infrastructure exists before starting service"
+    echo "ERROR: Failed to create nftables infrastructure"
+    echo "Fix the error above, then run: sudo /usr/local/sbin/bad_ips_installer.sh"
+    exit 1
 fi
 
 # Run database migration if database exists
@@ -279,112 +337,70 @@ fi
 # Reload systemd daemon
 systemctl daemon-reload
 
-# Check if config file exists
-if [ ! -f /usr/local/etc/badips.conf ]; then
-    echo ""
-    echo "==================================================================="
-    echo "IMPORTANT: Configuration Required"
-    echo "==================================================================="
-    echo ""
-    echo "Bad IPs has been installed but requires configuration."
-    echo ""
-    echo "Please copy the template to /usr/local/etc/badips.conf:"
-    echo ""
-    echo "  sudo cp /usr/local/etc/badips.conf.template /usr/local/etc/badips.conf"
-    echo ""
-    echo "CRITICAL: Edit the config and set 'never_block_cidrs' with your trusted networks!"
-    echo ""
-    echo "After configuration:"
-    echo "  sudo systemctl enable bad_ips.service"
-    echo "  sudo systemctl start bad_ips.service"
-    echo ""
-    echo "==================================================================="
-    echo ""
-else
-    echo "Configuration file already exists at /usr/local/etc/badips.conf"
-    echo "To upgrade: review changes in the template files if needed"
+# ============================================================================
+# 7. Configuration upgrades (pre-existing badips.conf only)
+# ============================================================================
+if [ "$CREATED_CONFIG" = "0" ] && [ -f "$CONF_MAIN" ]; then
+    echo "Configuration file already exists at $CONF_MAIN"
+    echo "To upgrade: review changes in $CONF_TEMPLATE if needed"
 
-    # ============================================================================
-    # UPGRADE: Add PublicBlocklistPlugins section if not present (v3.5.0+)
-    # ============================================================================
-    if ! grep -q "^\[PublicBlocklistPlugins:" /usr/local/etc/badips.conf 2>/dev/null; then
+    # v3.5.0 moved public blocklists into badips.d/80-publicblocklists.conf.
+    # Only add the section to badips.conf if no config file defines it.
+    if ! grep -qs "^\[PublicBlocklistPlugins:" "$CONF_MAIN" /usr/local/etc/badips.d/*.conf; then
         echo ""
         echo "Adding new PublicBlocklistPlugins configuration section..."
 
         # Backup the config file first
-        cp /usr/local/etc/badips.conf /usr/local/etc/badips.conf.bak-v3.5.0
-        echo "  • Backup created: /usr/local/etc/badips.conf.bak-v3.5.0"
+        cp "$CONF_MAIN" "$CONF_MAIN.bak-v3.5.0"
+        echo "  • Backup created: $CONF_MAIN.bak-v3.5.0"
 
-        # Append the PublicBlocklistPlugins section
-        cat >> /usr/local/etc/badips.conf <<'PLUGINEOF'
+        cat >> "$CONF_MAIN" <<'PLUGINEOF'
 
 # Public Blocklist Plugin Configurations (added in v3.5.0)
-# (optional) urls - Comma separated list of URLs to fetch the blocklist from
-# (optional) fetch_interval - How often (in seconds) to fetch the blocklist
-# (optional) use_cache - 1 to use caching, 0 to not use caching
-# (optional) cache_path - Directory path to store cached files (if use_cache is 1)
-# (required*) active - 1 to enable this blocklist plugin, 0 to disable it
-# Each plugin MUST have
-# * a unique name after PublicBlocklistPlugins:
-# * at least active = 1 to be used; all other parameters are really at the use of the plugin
 [PublicBlocklistPlugins:Spamhaus]
 urls = https://www.spamhaus.org/drop/drop.txt, https://www.spamhaus.org/drop/edrop.txt
 fetch_interval = 3600
 use_cache = 1
 cache_path = /var/cache/badips/
 active = 1
-
-[PublicBlocklistPlugins:Feodotracker]
-urls = https://feodotracker.abuse.ch/downloads/ipblocklist.txt
-fetch_interval = 7200
-use_cache = 1
-cache_path = /var/cache/badips/
-active = 0
-
-[PublicBlocklistPlugins:Blocklist_de]
-urls = https://lists.blocklist.de/lists/all.txt
-fetch_interval = 10800
-use_cache = 1
-cache_path = /var/cache/badips/
-active = 0
-
-[PublicBlocklistPlugins:DNSBL_Info]
-urls = https://www.dnsbl.info/dnsbl-list.php?file=dnslist-ipv4.txt
-fetch_interval = 14400
-use_cache = 1
-cache_path = /var/cache/badips/
-active = 0
-
-[PublicBlocklistPlugins:Malwaredomainlist]
-urls = http://www.malwaredomainlist.com/hostslist/ip.txt
-fetch_interval = 21600
-use_cache = 1
-cache_path = /var/cache/badips/
-active = 0
 PLUGINEOF
 
-        # Restore proper permissions
-        chmod 640 /usr/local/etc/badips.conf
-        chown root:"$BADIPS_GROUP" /usr/local/etc/badips.conf
-
+        chmod 640 "$CONF_MAIN"
+        chown root:"$BADIPS_GROUP" "$CONF_MAIN"
         echo "  • PublicBlocklistPlugins section added (Spamhaus enabled by default)"
-        echo "  • To disable: Set active = 0 for any plugin in badips.conf"
         echo ""
     fi
+fi
 
-    # On upgrade, restore service state
+# ============================================================================
+# 8. Service state
+# ============================================================================
+# Fresh install (we just created the config): enable and start.
+# Upgrade/reinstall: restore the state saved by prerm.
+if [ "$CREATED_CONFIG" = "1" ]; then
+    echo "Enabling and starting bad_ips.service..."
+    systemctl enable bad_ips.service >/dev/null 2>&1 || true
+    if systemctl restart bad_ips.service; then
+        sleep 3
+    fi
+    if systemctl is-active --quiet bad_ips.service; then
+        echo "✓ bad_ips.service is running"
+    else
+        # Don't fail the package install; the admin can fix config and start it
+        echo "WARNING: bad_ips.service did not start; see: journalctl -u bad_ips.service -n 50"
+    fi
+else
     if [ -f /var/lib/bad_ips/.upgrade_was_enabled ]; then
         echo "Re-enabling bad_ips.service (was enabled before upgrade)"
         systemctl enable bad_ips.service
-        rm -f /var/lib/bad_ips/.upgrade_was_enabled
     fi
-
     if [ -f /var/lib/bad_ips/.upgrade_was_active ]; then
         echo "Restarting bad_ips.service (was active before upgrade)"
-        systemctl start bad_ips.service
-        rm -f /var/lib/bad_ips/.upgrade_was_active
+        systemctl restart bad_ips.service || \
+            echo "WARNING: bad_ips.service failed to start; see: journalctl -u bad_ips.service -n 50"
     fi
 fi
+rm -f /var/lib/bad_ips/.upgrade_was_enabled /var/lib/bad_ips/.upgrade_was_active
 
 # ============================================================================
 # UPGRADE: Restart service if it was stopped for privilege separation upgrade

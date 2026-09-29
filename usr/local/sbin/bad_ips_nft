@@ -1,0 +1,129 @@
+#!/usr/bin/perl -T
+# ============================================================================
+# bad_ips_nft - privileged nftables helper for the Bad IPs service
+#
+# The bad_ips daemon runs as an unprivileged user and may run ONLY this
+# script via sudo (see /etc/sudoers.d/bad_ips). Every argument is strictly
+# validated and nft is exec'd directly (no shell), so the service user can
+# touch nothing but the elements of the sets in the "inet badips" table.
+#
+# nft joins its argv into a single command string and treats ';' as a
+# command separator, which is why sudoers wildcards on nft itself
+# ("nft add element inet badips *") are not a safe restriction.
+#
+# Usage:
+#   bad_ips_nft list-json                   # nft -j list ruleset
+#   bad_ips_nft flush <set>                 # flush one badips set
+#   bad_ips_nft add <set> <element> [ttl]   # add IP/CIDR/range, optional TTL (s)
+# ============================================================================
+use strict;
+use warnings;
+
+$ENV{PATH} = '/usr/sbin:/usr/bin:/sbin:/bin';
+delete @ENV{qw(IFS CDPATH ENV BASH_ENV)};
+
+my $NFT    = '/usr/sbin/nft';
+my @TABLE  = ('inet', 'badips');
+my %SETS   = map { $_ => 1 } qw(badipv4 badipv6 never_block never_block_v6 always_block always_block_v6);
+
+sub usage {
+    print STDERR "Usage: bad_ips_nft list-json | flush <set> | add <set> <ip|cidr|range> [ttl_seconds]\n";
+    exit 2;
+}
+
+sub fail {
+    print STDERR "bad_ips_nft: $_[0]\n";
+    exit 2;
+}
+
+# Address validation is pure Perl (no modules): this helper runs once per
+# blocked IP, and loading Socket for inet_pton doubled its startup time.
+sub is_ipv4 {
+    my ($a) = @_;
+    my @o = $a =~ /\A(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\z/ or return 0;
+    for (@o) { return 0 if $_ > 255 || /\A0\d/ }
+    return 1;
+}
+
+sub is_ipv6 {
+    my ($a) = @_;
+    return 0 unless $a =~ /:/ && $a !~ /:::/;
+    my $compressed = () = $a =~ /::/g;
+    return 0 if $compressed > 1;
+    my @groups;
+    for my $part ($compressed ? split(/::/, $a, 2) : ($a)) {
+        push @groups, split(/:/, $part, -1) if length $part;
+    }
+    my $n = 0;
+    for my $i (0 .. $#groups) {
+        my $g = $groups[$i];
+        if ($i == $#groups && $g =~ /\./ && $a =~ /\.\d+\z/) {    # embedded IPv4, e.g. ::ffff:1.2.3.4
+            return 0 unless is_ipv4($g);
+            $n += 2;
+            next;
+        }
+        return 0 unless $g =~ /\A[0-9A-Fa-f]{1,4}\z/;
+        $n++;
+    }
+    return $compressed ? $n < 8 : $n == 8;
+}
+
+# Returns the untainted address if it is a valid IPv4/IPv6 address, else undef.
+sub valid_addr {
+    my ($addr) = @_;
+    return undef unless defined $addr && $addr =~ /\A([0-9A-Fa-f:.]{2,45})\z/;
+    my $a = $1;
+    return $a if is_ipv4($a) || is_ipv6($a);
+    return undef;
+}
+
+# Accepts ADDR, ADDR/LEN or ADDR-ADDR. Returns the untainted element or undef.
+sub valid_element {
+    my ($elem) = @_;
+    return undef unless defined $elem;
+    if ($elem =~ m{\A([^/-]+)/(\d{1,3})\z}) {
+        my ($addr, $len) = (valid_addr($1), $2);
+        return undef unless defined $addr;
+        my $max = ($addr =~ /:/) ? 128 : 32;
+        return undef if $len > $max;
+        return "$addr/$len";
+    }
+    if ($elem =~ m{\A([^/-]+)-([^/-]+)\z}) {
+        my ($lo, $hi) = (valid_addr($1), valid_addr($2));
+        return undef unless defined $lo && defined $hi;
+        return undef unless ($lo =~ /:/ ? 1 : 0) == ($hi =~ /:/ ? 1 : 0);
+        return "$lo-$hi";
+    }
+    return valid_addr($elem);
+}
+
+sub valid_set {
+    my ($set) = @_;
+    return undef unless defined $set && $set =~ /\A([a-z0-9_]+)\z/ && $SETS{$1};
+    return $1;
+}
+
+my $action = shift @ARGV // usage();
+
+if ($action eq 'list-json') {
+    usage() if @ARGV;
+    exec { $NFT } $NFT, '-j', 'list', 'ruleset';
+}
+elsif ($action eq 'flush') {
+    usage() unless @ARGV == 1;
+    my $set = valid_set($ARGV[0]) // fail("invalid set name");
+    exec { $NFT } $NFT, 'flush', 'set', @TABLE, $set;
+}
+elsif ($action eq 'add') {
+    usage() unless @ARGV == 2 || @ARGV == 3;
+    my $set  = valid_set($ARGV[0])     // fail("invalid set name");
+    my $elem = valid_element($ARGV[1]) // fail("invalid IP/CIDR/range");
+    my @spec = ($elem);
+    if (@ARGV == 3) {
+        my ($ttl) = $ARGV[2] =~ /\A([1-9]\d{0,9})\z/ or fail("invalid ttl");
+        push @spec, 'timeout', "${ttl}s";
+    }
+    exec { $NFT } $NFT, 'add', 'element', @TABLE, $set, '{', @spec, '}';
+}
+
+usage();

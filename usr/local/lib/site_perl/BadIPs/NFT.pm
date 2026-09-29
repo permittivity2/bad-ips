@@ -3,11 +3,16 @@ package BadIPs::NFT;
 use strict;
 use warnings;
 use JSON;
+use IPC::Open3 qw(open3);
 use Log::Log4perl qw(get_logger);
 
 our $VERSION = '3.6.9';
 
 my $log = get_logger("BadIPs::NFT");
+
+# Privileged helper: the only command the service user may run via sudo.
+# It validates every argument and only touches the inet badips table.
+my @HELPER = ('sudo', '-n', '/usr/local/sbin/bad_ips_nft');
 
 # Acceptable nft error messages and their log levels
 # These errors are non-fatal and should be logged at the specified level
@@ -113,10 +118,15 @@ sub block_ip {
         return { ok => 0, err => "ip and ttl are required" };
     }
 
+    # The helper only accepts a positive whole number of seconds
+    $ttl = int($ttl);
+    $ttl = 1 if $ttl < 1;
+
     # Detect IPv6 (contains colons) vs IPv4 and use appropriate set
     my $set = ($ip =~ /:/) ? 'badipv6' : 'badipv4';
 
-    my $cmd = "sudo nft add element $self->{table} $self->{family_table} $set { $ip timeout ${ttl}s }";
+    my @args = ('add', $set, $ip, $ttl);
+    my $cmd  = join(' ', @HELPER, @args);
 
     if ($self->{dry_run}) {
         my $exp = time() + $ttl;
@@ -126,8 +136,7 @@ sub block_ip {
 
     my ($out, $rc);
     eval {
-        $out = qx($cmd 2>&1);
-        $rc  = $? >> 8;
+        ($out, $rc) = _run_helper(@args);
     };
     if ($@) {
         my $err = "Command execution failed: $@";
@@ -226,8 +235,8 @@ Returns:
 sub ruleset_as_json {
     my ($self) = @_;
 
-    my $out = `sudo nft -j list ruleset`;
-    unless ($out) {
+    my ($out, $rc) = $self->ruleset_json_raw();
+    unless ($rc == 0 && $out) {
         $log->error("Failed to get nftables ruleset");
         return {};
     }
@@ -242,6 +251,39 @@ sub ruleset_as_json {
     }
 
     return $json;
+}
+
+=head2 ruleset_json_raw
+
+    my ($out, $rc) = $nft->ruleset_json_raw();
+
+Runs "nft -j list ruleset" via the privileged helper and returns the raw
+output (stdout and stderr combined) and the exit code.
+
+=cut
+
+sub ruleset_json_raw {
+    my ($self) = @_;
+    return _run_helper('list-json');
+}
+
+=head2 _run_helper (private)
+
+Runs the privileged bad_ips_nft helper with a list of arguments (no shell
+is involved) and returns (combined stdout+stderr, exit code).
+
+=cut
+
+sub _run_helper {
+    my (@args) = @_;
+
+    my $pid = open3(my $in, my $out_fh, undef, @HELPER, @args);
+    close $in;
+    my $out = do { local $/; <$out_fh> } // '';
+    close $out_fh;
+    waitpid($pid, 0);
+
+    return ($out, $? >> 8);
 }
 
 =head2 _check_nft_error (private)
@@ -289,14 +331,12 @@ sub _refresh_set {
 
     $log->info("Refreshing $set_name ($version) nftables set");
 
-    my $table        = $self->{table};
-    my $family_table = $self->{family_table};
-
     # Flush the set
     if ($self->{dry_run}) {
-        $log->info("[DRY RUN] Would flush: sudo nft flush set $table $family_table $set_name");
+        $log->info("[DRY RUN] Would flush: " . join(' ', @HELPER, 'flush', $set_name));
     } else {
-        system("sudo nft flush set $table $family_table $set_name 2>/dev/null");
+        my ($out, $rc) = _run_helper('flush', $set_name);
+        $log->warn("Failed to flush $set_name set: $out (rc: $rc)") if $rc != 0;
     }
 
     # Add each CIDR
@@ -305,15 +345,12 @@ sub _refresh_set {
         $cidr =~ s/^\s+|\s+$//g;
         next unless $cidr;
 
-        my $cmd = "sudo nft add element $table $family_table $set_name { $cidr }";
-
         if ($self->{dry_run}) {
-            $log->info("[DRY RUN] Would execute: $cmd");
+            $log->info("[DRY RUN] Would execute: " . join(' ', @HELPER, 'add', $set_name, $cidr));
             next;
         }
 
-        my $out = qx($cmd 2>&1);
-        my $rc = $? >> 8;
+        my ($out, $rc) = _run_helper('add', $set_name, $cidr);
 
         if ($rc == 0) {
             $log->debug("Added $cidr to $set_name set");

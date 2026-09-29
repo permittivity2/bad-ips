@@ -118,13 +118,16 @@ sub run {
         # Sleep for a configured interval before next check
         my $next_check = time() + $self->{fetch_interval};
         while (time() < $next_check) {
+            # return (not last): "last" only left this sleep loop, so the
+            # outer loop kept polling the logs until the thread was killed
+            # and, on reload, kept running alongside the new plugin thread.
             if ( $self->shutdown_check() ) {
                 $self->{log}->info("Shutdown signal received during sleep; exiting log monitoring");
-                last;
+                return 1;
             }
             if ( $self->reload_check() ) {
                 $self->{log}->info("Reload signal received during sleep; exiting log monitoring for reload");
-                last;
+                return 1;
             }
             sleep(1);
         }
@@ -140,11 +143,6 @@ sub run {
         # Enqueue IPs found in new log lines
         $self->_add_ips_to_queue( lines => $lines );
     }
-
-
-    $self->{log}->info("Log monitoring completed");
-
-    return 1;
 }
 
 =head2 _add_ips_to_queue

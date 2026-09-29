@@ -23,7 +23,16 @@ Run in dry-run mode where IPs are detected but not actually blocked. Useful for 
 .SH FILES
 .TP
 .I /usr/local/etc/badips.conf
-Main configuration file containing global settings, blocking duration, trusted networks, and logging configuration.
+Main configuration file containing global settings, blocking duration, trusted networks, and logging configuration. On first install the package creates it from
+.I /usr/local/etc/badips.conf.template
+(standalone mode: no central database) and appends the IPs of current SSH sessions and of successful SSH logins from the last 30 days to
+.B never_block_cidrs
+/
+.BR never_block_cidrs_v6 .
+The package then enables and starts the service. Comments must be on their own line: Config::Tiny treats "key = value # comment" as part of the value.
+.TP
+.I /usr/local/etc/badips.conf.template
+Default main configuration shipped with the package.
 .TP
 .I /usr/local/etc/badips/log4perl.conf
 Log4perl configuration file controlling log format, level, and output destination. Changes take effect in the main thread after ~5 seconds, then in each worker thread after the next reload cycle (~5 seconds + thread reload time). A log message indicates when threads will be reloaded. The 5-second interval is hardcoded in /usr/local/sbin/bad_ips and can be modified if needed (requires service restart).
@@ -38,7 +47,17 @@ Detector configuration files for various services (SSH, mail, web, DNS, etc.). E
 Directory for local state files and failover logs.
 .TP
 .I /var/log/bad_ips/bad_ips.log
-Main log file for Bad IPs daemon. Configure log rotation with logrotate.
+Main log file for Bad IPs daemon. Rotated daily by
+.I /etc/logrotate.d/bad_ips
+(copytruncate, 14 days).
+.TP
+.I /usr/local/sbin/bad_ips_nft
+Privileged nftables helper. The only command the service user may run via sudo (see SECURITY CONSIDERATIONS).
+.TP
+.I /usr/local/sbin/bad_ips_installer.sh
+Creates/refreshes the nftables infrastructure and restarts the service. With
+.B \-\-infra\-only
+it only creates the infrastructure; the service unit runs it that way (as root) before every start.
 .TP
 .I /usr/share/doc/bad-ips/
 Documentation directory containing README and configuration guides.
@@ -122,6 +141,12 @@ Leverages collective intelligence but doesn't report own data.
 .IP "Full Sync (both=1)"
 Bidirectional synchronization for distributed threat intelligence.
 .RE
+.PP
+The central_db_sync thread is only started when
+.B sync_blocked_to_database
+= 1, and the pull_global_blocks thread only when
+.B block_ips_from_database
+= 1, so honeypot/standalone mode needs no database.
 .SS Database Resilience Configuration
 Optional settings in
 .I /usr/local/etc/badips.conf
@@ -553,6 +578,14 @@ View live logs
 .SH NFTABLES INTEGRATION
 Bad IPs creates and manages its own nftables table with six sets for dual-stack IP filtering. The configuration is stored in /etc/nftables.d/99-badips.nft and uses the prerouting hook at priority -150 for comprehensive traffic filtering.
 .PP
+The table is (re)created by
+.B bad_ips_installer.sh \-\-infra\-only
+before every service start, so it exists at boot regardless of /etc/nftables.conf. The installer also appends
+.B include \(dq/etc/nftables.d/*.nft\(dq
+to /etc/nftables.conf (if missing and the result validates) so the table survives
+.BR "systemctl reload nftables" .
+Removing the package deletes only the inet badips table.
+.PP
 .B IPv4 Sets:
 .TP
 .B nft list set inet badips never_block
@@ -741,6 +774,13 @@ Note: IPs in always_block are still added to badipv4/badipv6 and the database fo
 Protect
 .I /usr/local/etc/badips.d/database.conf
 which contains database passwords. The installer sets mode 600 (owner read/write only).
+.TP
+.B Privilege Separation
+The daemon runs as the unprivileged
+.B badips
+user. Its only sudo right is
+.IR /usr/local/sbin/bad_ips_nft ,
+which accepts just "list-json", "flush <set>" and "add <set> <ip|cidr|range> [ttl]" for the six sets of the inet badips table, validates every argument and execs nft without a shell. (Before 3.7.0 the sudoers rule allowed "nft add element inet badips *"; nft treats ";" as a command separator, so that allowed any nft command as root.)
 .TP
 .B Never-Block CIDRs
 Always configure your trusted networks in

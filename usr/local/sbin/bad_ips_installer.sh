@@ -13,6 +13,26 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
+# Options
+#   --infra-only   Only create/refresh the nftables infrastructure; do not
+#                  stop/start bad_ips.service. Used by the package postinst
+#                  and by the service unit (ExecStartPre) on every start.
+INFRA_ONLY=0
+for arg in "$@"; do
+    case "$arg" in
+        --infra-only) INFRA_ONLY=1 ;;
+        -h|--help)
+            echo "Usage: $0 [--infra-only]"
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $arg" >&2
+            echo "Usage: $0 [--infra-only]" >&2
+            exit 1
+            ;;
+    esac
+done
+
 # Check root
 if [[ $EUID -ne 0 ]]; then
    echo -e "${RED}Error: This script must be run as root${NC}"
@@ -157,14 +177,29 @@ else
     exit 1
 fi
 
-# Check if /etc/nftables.conf includes nftables.d
+# Make /etc/nftables.conf load $NFTABLES_D so the badips table survives an
+# nftables reload/restart (the stock config starts with "flush ruleset").
+# bad_ips.service also recreates the table on every start via ExecStartPre,
+# so this is not needed for boot, only for nftables reloads.
 NFTABLES_CONF="/etc/nftables.conf"
 if [ -f "$NFTABLES_CONF" ]; then
-    if ! grep -q 'include.*nftables\.d' "$NFTABLES_CONF" 2>/dev/null; then
-        echo ""
-        echo -e "${YELLOW}⚠ Note: $NFTABLES_CONF may not include files from $NFTABLES_D${NC}"
-        echo "  Add this line to $NFTABLES_CONF to load Bad IPs on boot:"
-        echo "    include \"$NFTABLES_D/*.nft\""
+    if ! grep -Eq '^[[:space:]]*include[[:space:]]+"?/etc/nftables\.d/' "$NFTABLES_CONF" 2>/dev/null; then
+        cp -p "$NFTABLES_CONF" "$NFTABLES_CONF.bad-ips-bak"
+        cat >> "$NFTABLES_CONF" << INCLUDECONF
+
+# Added by bad-ips: load drop-in rulesets (e.g. $BADIPS_NFT) so they
+# survive "systemctl reload nftables". Safe to keep if bad-ips is removed.
+include "$NFTABLES_D/*.nft"
+INCLUDECONF
+        if nft -c -f "$NFTABLES_CONF" >/dev/null 2>&1; then
+            rm -f "$NFTABLES_CONF.bad-ips-bak"
+            echo "  ✓ Added include for $NFTABLES_D to $NFTABLES_CONF"
+        else
+            # Never leave the host firewall config in a state that fails to load
+            mv -f "$NFTABLES_CONF.bad-ips-bak" "$NFTABLES_CONF"
+            echo -e "${YELLOW}  ⚠ Could not add include to $NFTABLES_CONF (validation failed); left unchanged${NC}" >&2
+            echo "    Add manually: include \"$NFTABLES_D/*.nft\"" >&2
+        fi
     else
         echo "  ✓ $NFTABLES_CONF already includes $NFTABLES_D"
     fi
@@ -173,6 +208,17 @@ fi
 echo ""
 echo -e "${GREEN}✓ Bad IPs nftables infrastructure ready${NC}"
 echo ""
+
+if [ $INFRA_ONLY -eq 1 ]; then
+    exit 0
+fi
+
+if [ ! -f /usr/local/etc/badips.conf ]; then
+    echo -e "${YELLOW}⚠ /usr/local/etc/badips.conf not found; not starting bad_ips.service${NC}"
+    echo "  Create it from the template, then: sudo systemctl enable --now bad_ips.service"
+    echo "    sudo cp /usr/local/etc/badips.conf.template /usr/local/etc/badips.conf"
+    exit 0
+fi
 
 # Stop the service if running
 echo "Stopping bad_ips service..."

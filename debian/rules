@@ -31,4 +31,6 @@ override_dh_fixperms:
 	# Ensure executables have correct permissions
 	chmod +x debian/bad-ips/usr/local/sbin/bad_ips
 	chmod +x debian/bad-ips/usr/local/sbin/bad_ips_installer.sh
+	chmod 0755 debian/bad-ips/usr/local/sbin/bad_ips_nft
+	chmod 0755 debian/bad-ips/usr/local/share/bad_ips/reconfigure-user.sh
 	chmod +x debian/bad-ips/usr/local/share/bad_ips/migrate_database_v2.pl

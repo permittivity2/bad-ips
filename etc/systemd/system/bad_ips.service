@@ -5,6 +5,9 @@ Wants=nftables.service
 
 [Service]
 Type=simple
+# Create/refresh the nftables table, sets and chain as root ("+") before every
+# start, so the infrastructure exists at boot regardless of /etc/nftables.conf
+ExecStartPre=+/usr/local/sbin/bad_ips_installer.sh --infra-only
 ExecStart=/bin/sh -c 'tail -F /var/log/bad_ips/bad_ips.log | systemd-cat -t bad_ips & exec /usr/local/sbin/bad_ips'
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
