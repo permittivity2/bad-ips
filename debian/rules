@@ -15,7 +15,12 @@ override_dh_auto_build:
 	# Nothing to build - pure Perl package
 
 override_dh_auto_test:
-	# No automated tests to run
+	# The role-mode test suite. t/store.t and t/engine.t start a private,
+	# throwaway PostgreSQL when its server binaries are installed and skip
+	# otherwise; nothing here touches a real database or firewall.
+ifeq (,$(filter nocheck,$(DEB_BUILD_OPTIONS)))
+	prove -I usr/local/lib/site_perl t/
+endif
 
 override_dh_auto_install:
 	# Don't use 'make install' - use dh_install with debian/install instead

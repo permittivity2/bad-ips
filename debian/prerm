@@ -1,36 +1,29 @@
 #!/bin/bash
 set -e
 
-# Save service state before stopping (for upgrade restore)
-# During upgrade, $1 = "upgrade" and $2 = new-version
-# During removal, $1 = "remove"
+# On upgrade ($1 = "upgrade"): stop the service and remember whether it was
+# running, but leave it ENABLED -- the new postinst restarts it (legacy mode)
+# or sets it by role (role mode). Before 4.0 this also disabled the service on
+# every upgrade and relied on postinst to re-enable it.
+# On remove/purge: stop, disable, and remove the nftables table.
 mkdir -p /var/lib/bad_ips
 
-# Always save state if enabled/active (we'll clean up in postrm if it's a removal)
 if systemctl is-enabled --quiet bad_ips.service 2>/dev/null; then
     touch /var/lib/bad_ips/.upgrade_was_enabled
-    echo "Saving enabled state for upgrade"
 fi
 
 if systemctl is-active --quiet bad_ips.service; then
     touch /var/lib/bad_ips/.upgrade_was_active
-    echo "Saving active state for upgrade"
-fi
-
-# Stop service if running
-if systemctl is-active --quiet bad_ips.service; then
     systemctl stop bad_ips.service
     echo "Stopped bad_ips.service"
 fi
 
-# Disable service if enabled (will be re-enabled in postinst if upgrade)
-if systemctl is-enabled --quiet bad_ips.service 2>/dev/null; then
-    systemctl disable bad_ips.service
-    echo "Disabled bad_ips.service"
-fi
-
-# Clean up nftables configuration on remove/purge
 if [ "$1" = "remove" ] || [ "$1" = "purge" ]; then
+    if systemctl is-enabled --quiet bad_ips.service 2>/dev/null; then
+        systemctl disable bad_ips.service
+        echo "Disabled bad_ips.service"
+    fi
+
     # Remove Bad IPs nftables configuration and its live table. Deleting
     # just our table leaves the rest of the host firewall untouched (a
     # "systemctl reload nftables" would also drop any runtime-added rules).

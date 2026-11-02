@@ -1,6 +1,6 @@
 # 🛡️ Bad IPs - Distributed IP Blocking System
 
-[![Version](https://img.shields.io/badge/version-3.7.0-blue.svg)](https://github.com/permittivity2/bad-ips/releases)
+[![Version](https://img.shields.io/badge/version-4.0.0-blue.svg)](https://github.com/permittivity2/bad-ips/releases)
 [![Status](https://img.shields.io/badge/status-ALPHA-red.svg)](https://github.com/permittivity2/bad-ips)
 [![License](https://img.shields.io/badge/license-Proprietary-red.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Debian%20%7C%20Ubuntu-orange.svg)](https://projects.thedude.vip/bad-ips/)
@@ -17,6 +17,29 @@ BadIPs is a coordinated, deterministic, network-wide ban system intended for env
 Website for install and full documentation:  https://projects.thedude.vip/bad-ips/index.html
 
 ---
+
+## Role Mode (4.0): one edge, many reporters
+
+For a fleet where every internet connection enters through one edge, set a
+**role** and the 4.0 engine runs instead of the 3.x daemon:
+
+- `role = report` — watch logs, report attackers to the shared ban list; never
+  touches the local firewall (behind a proxy, blocking there would do nothing).
+- `role = block` — the edge: reads the whole shared list plus public feeds
+  (Spamhaus DROP) and drops them, on `block_interfaces` only.
+- `role = off` — installed, switched off.
+
+What changed for safety: every rule counts repeats within a window measured
+by the log line's own time; the client address is pinned to a fixed place in
+the line (an attacker cannot get an innocent server banned by typing its
+address into a username); never-block networks are refused in code (IPv4 and
+IPv6, overlaps in either direction) *and* survive nftables reloads; bans
+survive reloads too; DNS is never blocked; and `bad_ips unban <addr>` lifts a
+ban everywhere within a minute (`bad_ips why <addr>` says why it happened).
+Rules live in `badips.d/60-rules.conf`; check them against a real log with
+`bad_ips test-rules <logfile>`. See `man bad_ips` (ROLE MODE) for every key.
+
+Without a role, nothing changes: the 3.x daemon runs exactly as before.
 
 ## Why BadIPs Exists
 

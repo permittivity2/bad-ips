@@ -4,6 +4,29 @@
 
 Bad IPs uses INI-style configuration files. The main config is `/usr/local/etc/badips.conf`, with detector-specific configs in `/usr/local/etc/badips.d/*.conf`.
 
+## Role Mode (4.0)
+
+A `role` in `[global]` selects the 4.0 engine; `man bad_ips` (ROLE MODE) is
+the authoritative reference. A minimal report host:
+
+```ini
+[global]
+role = report
+never_block_cidrs = 203.0.113.0/29, 2001:db8::/64
+db_host = db.example.net
+db_port = 6432
+db_name = homelab
+db_user = badips_runtime
+db_password = ...
+db_schema = badips
+```
+
+and the block host (the edge) adds `role = block` and
+`block_interfaces = eth6, eth7`. Rules are `[rule:NAME]` sections (shipped in
+`badips.d/60-rules.conf`); redefine a section with the same name in a later
+file to change it, or set `active = 0` there to switch it off. The private,
+loopback, link-local and multicast ranges are always never-blocked.
+
 ## Main Configuration: badips.conf
 
 ### Quick Start

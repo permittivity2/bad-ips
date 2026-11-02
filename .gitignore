@@ -17,6 +17,8 @@ debian/bad-ips/
 
 # Database files (should not be in source)
 *.sql
+# ...except the shipped shared-ban-list schema
+!usr/local/share/bad_ips/schema.sql
 *.db
 *.sqlite
 

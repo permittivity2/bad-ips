@@ -1,4 +1,17 @@
 #!/usr/bin/env perl
+# bad_ips -- the Bad IPs daemon and command line.
+#
+# With a role set in the configuration (role = block | report | off) this runs
+# the 4.0 role-mode engine; without one it runs the 3.x daemon exactly as
+# before. Commands (role mode only):
+#
+#   bad_ips unban <addr> [--hours N] [--reason TEXT]
+#   bad_ips ban   <addr> [--for 7d] [--reason TEXT]
+#   bad_ips list  [--limit N]
+#   bad_ips why   <addr>
+#   bad_ips test-rules <logfile> [--rule NAME]
+#   bad_ips --test-config
+#   bad_ips [--dry-run]                  (the daemon)
 use strict;
 use warnings;
 
@@ -6,9 +19,48 @@ use Getopt::Long qw(GetOptions);
 use Log::Log4perl qw(:easy get_logger);
 use Log::Log4perl::MDC;
 
-my $logconf = '/usr/local/etc/badips/log4perl.conf';
-my $logconf_refresh_interval = 5;
+use lib '/usr/local/lib/site_perl';
 
+my $logconf   = '/usr/local/etc/badips/log4perl.conf';
+my $logconf_refresh_interval = 5;
+my $conf_main = '/usr/local/etc/badips.conf';
+my $conf_dir  = '/usr/local/etc/badips.d';
+
+# --- commands ---------------------------------------------------------------
+my %COMMANDS = map { $_ => 1 } qw(unban ban list why test-rules);
+if (@ARGV && $COMMANDS{ $ARGV[0] }) {
+    Log::Log4perl->easy_init({ level => $WARN, layout => '%m%n', file => 'STDERR' });
+    require BadIPs::Engine::CLI;
+    exit BadIPs::Engine::CLI::main(conf_main => $conf_main, conf_dir => $conf_dir, argv => [@ARGV]);
+}
+
+# --- the daemon ---------------------------------------------------------------
+my $test_config = 0;
+my $dry_run     = 0;
+
+GetOptions(
+  'test-config!' => \$test_config,
+  'dry-run!'     => \$dry_run,
+) or die "Usage: $0 [--test-config] [--dry-run] | unban|ban|list|why|test-rules ...\n";
+
+require BadIPs::Engine::Config;
+my $role = BadIPs::Engine::Config::role_from_files(conf_main => $conf_main, conf_dir => $conf_dir);
+
+if (defined $role) {
+    if ($test_config) {
+        Log::Log4perl->easy_init({ level => $WARN, layout => '%m%n', file => 'STDERR' });
+        require BadIPs::Engine::CLI;
+        exit BadIPs::Engine::CLI::test_config(conf_main => $conf_main, conf_dir => $conf_dir);
+    }
+    eval { Log::Log4perl::init_and_watch($logconf, $logconf_refresh_interval) };
+    die "Failed to initialize Log::Log4perl with config '$logconf': $@\n" if $@;
+    Log::Log4perl::MDC->put("THREAD" => "main");
+    require BadIPs::Engine;
+    my $engine = BadIPs::Engine->new(conf_main => $conf_main, conf_dir => $conf_dir, dry_run => $dry_run);
+    exit $engine->run;
+}
+
+# --- legacy (3.x) daemon: no role configured ------------------------------------
 eval {
   Log::Log4perl::init_and_watch($logconf, $logconf_refresh_interval);
 };
@@ -17,20 +69,8 @@ if ($@) {
 }
 Log::Log4perl::MDC->put("THREAD" => "main");
 
-use lib '/usr/local/lib/site_perl';
-use BadIPs;
-use Config::Tiny;
-
-my $conf_main = '/usr/local/etc/badips.conf';
-my $conf_dir  = '/usr/local/etc/badips.d';
-
-my $test_config = 0;
-my $dry_run     = 0;
-
-GetOptions(
-  'test-config!' => \$test_config,
-  'dry-run!'     => \$dry_run,
-) or die "Usage: $0 [--test-config] [--dry-run]\n";
+require BadIPs;
+require Config::Tiny;
 
 my $logger = get_logger("BadIPs");
 $logger->info("Starting BadIPs application");
@@ -54,4 +94,3 @@ $app->run();
 $logger->info("BadIPs application exited normally");
 
 exit(0);
-

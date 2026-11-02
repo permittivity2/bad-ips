@@ -1,3 +1,48 @@
+bad-ips (4.0.0) unstable; urgency=medium
+
+  * Role mode, for a fleet behind one internet edge. Set
+    "role = block | report | off" and the 4.0 engine runs instead of the
+    3.x daemon (which is unchanged, and still runs when no role is set):
+    report hosts watch their logs and report to the shared ban list;
+    the block host reads the whole list and drops it on the interfaces in
+    block_interfaces only; off installs the package switched off.
+  * New rule engine ([rule:NAME] sections, shipped in badips.d/60-rules.conf):
+    every rule counts repeats (count within window) measured by the log
+    line's OWN timestamp, takes the client address from a fixed place in
+    the line via (?<ip>...), and bans for its own length. Rules merge by
+    name across files, so a later file can replace or switch off a shipped
+    rule (3.x could not). Shipped rules: nginx-probe, nginx-catchall-flood,
+    postfix-auth, postfix-auth-slow, postfix-abuse, dovecot-auth.
+  * Log sources resume from a saved inode/offset (or journal cursor), read
+    back at most backread_bytes on a fresh start, and follow rotation by
+    rename or truncation.
+  * Never-block: a built-in floor (private, loopback, link-local, multicast)
+    plus never_block_cidrs (IPv4 and IPv6, now both checked in code). Any
+    entry that OVERLAPS a never-block range, in either direction, is refused
+    at report time and again at block time; never-block is also written as
+    fixed elements into 99-badips.nft, so an nftables reload restores it in
+    the same step as the table.
+  * The block role reconciles every reconcile_interval: it rebuilds the
+    table in one atomic transaction when it is missing or wrong, otherwise
+    applies only the differences; bans survive nftables reloads; a starting
+    or rotated-in node loads every active ban with its real end time; DNS
+    (port 53) is accepted ahead of the drops (dns_accept).
+  * Shared list: detections are reported directly (not only after a local
+    block), feed and pulled entries are never re-shared, a re-ban keeps the
+    later end time, and a database outage only delays sharing (bounded
+    queue, retry with backoff) instead of stopping it until a reload.
+    New exemptions table; schema in /usr/local/share/bad_ips/schema.sql.
+  * New commands: bad_ips unban | ban | list | why | test-rules, and a
+    role-mode --test-config that also checks the database is reachable.
+  * bad_ips_nft: new state / sync / render commands; sync validates a whole
+    desired state, checks it with nft -c and applies it as one transaction.
+  * [feed:NAME] public blocklists for the block role (Spamhaus DROP v4 and
+    v6 shipped; EDROP was merged into DROP), cached, sanity-checked, local.
+  * prerm no longer disables the service on upgrade.
+  * Test suite (t/, run with prove, also at package build).
+
+ -- Gardner <gardner@homelab>  Mon, 02 Nov 2026 16:25:49 -0600
+
 bad-ips (3.8.0) unstable; urgency=medium
 
   * GeneralLogMonitor: recognise successful logins. New

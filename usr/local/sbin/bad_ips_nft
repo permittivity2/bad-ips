@@ -11,10 +11,34 @@
 # command separator, which is why sudoers wildcards on nft itself
 # ("nft add element inet badips *") are not a safe restriction.
 #
-# Usage:
+# Usage (legacy daemon, 3.x):
 #   bad_ips_nft list-json                   # nft -j list ruleset
 #   bad_ips_nft flush <set>                 # flush one badips set
 #   bad_ips_nft add <set> <element> [ttl]   # add IP/CIDR/range, optional TTL (s)
+#
+# Usage (role mode, 4.0):
+#   bad_ips_nft state                       # nft -j list table inet badips
+#   bad_ips_nft sync   < request            # apply a whole desired state
+#   bad_ips_nft render < request            # print what sync would do; no root needed
+#   bad_ips_nft remove                      # drop the table and its persistent file
+#
+# A sync request is line-based; every value is validated, and the whole change
+# is checked with `nft -c` and then applied as ONE nft transaction, so the
+# firewall is never left half-changed:
+#
+#   mode replace | apply
+#   iface <name>          replace only: drop only on these interfaces (none = all)
+#   dns_accept 0|1        replace only: never drop DNS (port 53)
+#   never <cidr>          replace only: the never-block list
+#   feedreset             apply only: empty the feed sets before the feed lines
+#   feed <cidr>           a public-blocklist range
+#   ban <addr> <ttl>      a single address, ttl in seconds
+#   unban <addr>          apply only: remove a single address
+#
+# "replace" rebuilds the whole table (and rewrites $PERSIST, which holds the
+# static parts -- never-block, interfaces, rules -- so that a plain nftables
+# reload brings never-block back in the same step as the table). "apply"
+# changes only elements.
 # ============================================================================
 use strict;
 use warnings;
@@ -22,12 +46,16 @@ use warnings;
 $ENV{PATH} = '/usr/sbin:/usr/bin:/sbin:/bin';
 delete @ENV{qw(IFS CDPATH ENV BASH_ENV)};
 
-my $NFT    = '/usr/sbin/nft';
-my @TABLE  = ('inet', 'badips');
-my %SETS   = map { $_ => 1 } qw(badipv4 badipv6 never_block never_block_v6 always_block always_block_v6);
+my $NFT     = '/usr/sbin/nft';
+my @TABLE   = ('inet', 'badips');
+my %SETS    = map { $_ => 1 } qw(badipv4 badipv6 never_block never_block_v6 always_block always_block_v6);
+my $PERSIST = '/etc/nftables.d/99-badips.nft';
+my $MAX_LINES = 200_000;
+my $MAX_TTL   = 30 * 86400;    # the daemon re-extends longer bans as they run down
 
 sub usage {
-    print STDERR "Usage: bad_ips_nft list-json | flush <set> | add <set> <ip|cidr|range> [ttl_seconds]\n";
+    print STDERR "Usage: bad_ips_nft list-json | flush <set> | add <set> <ip|cidr|range> [ttl_seconds]\n"
+               . "       bad_ips_nft state | sync | render   (request on stdin)\n";
     exit 2;
 }
 
@@ -103,9 +131,200 @@ sub valid_set {
     return $1;
 }
 
+# --- role mode: sync requests -----------------------------------------------
+
+# ADDR/LEN or ADDR, no ranges. Returns (family, untainted element) or ().
+sub valid_cidr {
+    my ($c) = @_;
+    my $e = valid_element($c);
+    return () unless defined $e && $e !~ /-/;
+    return (($e =~ /:/ ? 6 : 4), $e);
+}
+
+sub read_request {
+    my ($fh) = @_;
+    my %r = (iface => [], never => { 4 => [], 6 => [] }, feed => { 4 => [], 6 => [] },
+             ban => { 4 => [], 6 => [] }, unban => { 4 => [], 6 => [] });
+    my $n = 0;
+    while (my $line = <$fh>) {
+        fail("request too long") if ++$n > $MAX_LINES;
+        $line =~ s/\r?\n\z//;
+        next if $line =~ /\A\s*(?:#|\z)/;
+        my ($cmd, @a) = split ' ', $line;
+        if ($cmd eq 'mode') {
+            fail("mode given twice") if $r{mode};
+            ($r{mode}) = ($a[0] // '') =~ /\A(replace|apply)\z/ or fail("bad mode");
+        }
+        elsif ($cmd eq 'iface') {
+            my ($i) = ($a[0] // '') =~ /\A([A-Za-z0-9_.-]{1,15})\z/ or fail("bad interface name");
+            fail("too many interfaces") if @{ $r{iface} } >= 16;
+            push @{ $r{iface} }, $i;
+        }
+        elsif ($cmd eq 'dns_accept') {
+            ($r{dns_accept}) = ($a[0] // '') =~ /\A([01])\z/ or fail("bad dns_accept");
+        }
+        elsif ($cmd eq 'feedreset') {
+            $r{feedreset} = 1;
+        }
+        elsif ($cmd eq 'never' || $cmd eq 'feed') {
+            my ($fam, $e) = valid_cidr($a[0]) or fail("bad $cmd entry");
+            push @{ $r{$cmd}{$fam} }, $e;
+        }
+        elsif ($cmd eq 'ban') {
+            my ($fam, $e) = valid_cidr($a[0]) or fail("bad ban address");
+            fail("ban takes a single address") if $e =~ m{/};
+            my ($ttl) = ($a[1] // '') =~ /\A([1-9]\d{0,9})\z/ or fail("bad ban ttl");
+            $ttl = $MAX_TTL if $ttl > $MAX_TTL;
+            push @{ $r{ban}{$fam} }, "$e timeout ${ttl}s";
+        }
+        elsif ($cmd eq 'unban') {
+            my ($fam, $e) = valid_cidr($a[0]) or fail("bad unban address");
+            fail("unban takes a single address") if $e =~ m{/};
+            push @{ $r{unban}{$fam} }, $e;
+        }
+        else {
+            fail("unknown request line");
+        }
+    }
+    fail("request has no mode") unless $r{mode};
+    if ($r{mode} eq 'replace') {
+        fail("replace does not take unban or feedreset") if $r{feedreset} || @{ $r{unban}{4} } || @{ $r{unban}{6} };
+    }
+    else {
+        fail("apply does not take iface, dns_accept or never")
+            if @{ $r{iface} } || defined $r{dns_accept} || @{ $r{never}{4} } || @{ $r{never}{6} };
+        fail("feed lines in apply mode need feedreset") if !$r{feedreset} && (@{ $r{feed}{4} } || @{ $r{feed}{6} });
+    }
+    return \%r;
+}
+
+sub elements {    # "elements = { a, b }" in chunks small enough for nft's parser
+    my ($list) = @_;
+    return '' unless @$list;
+    return "        elements = { " . join(",\n                     ", @$list) . " }\n";
+}
+
+sub table_text {
+    my ($r, $with_dynamic) = @_;
+    my %e = $with_dynamic ? (ban => $r->{ban}, feed => $r->{feed}) : (ban => { 4 => [], 6 => [] }, feed => { 4 => [], 6 => [] });
+    my $t = "table inet badips {\n";
+    $t .= "    set badipv4 {\n        type ipv4_addr\n        flags timeout\n" . elements($e{ban}{4}) . "    }\n";
+    $t .= "    set badipv6 {\n        type ipv6_addr\n        flags timeout\n" . elements($e{ban}{6}) . "    }\n";
+    $t .= "    set feedv4 {\n        type ipv4_addr\n        flags interval\n" . elements($e{feed}{4}) . "    }\n";
+    $t .= "    set feedv6 {\n        type ipv6_addr\n        flags interval\n" . elements($e{feed}{6}) . "    }\n";
+    $t .= "    set never_block {\n        type ipv4_addr\n        flags interval\n" . elements($r->{never}{4}) . "    }\n";
+    $t .= "    set never_block_v6 {\n        type ipv6_addr\n        flags interval\n" . elements($r->{never}{6}) . "    }\n";
+    $t .= "    chain preroute_block {\n";
+    $t .= "        type filter hook prerouting priority -150; policy accept;\n";
+    $t .= sprintf qq{        iifname != { %s } accept comment "badips:iface"\n}, join(', ', map { qq{"$_"} } @{ $r->{iface} })
+        if @{ $r->{iface} };
+    $t .= qq{        ip saddr \@never_block accept comment "badips:never4"\n};
+    $t .= qq{        ip6 saddr \@never_block_v6 accept comment "badips:never6"\n};
+    $t .= qq{        meta l4proto { tcp, udp } th dport 53 accept comment "badips:dns"\n} if $r->{dns_accept} // 1;
+    $t .= qq{        ip saddr \@badipv4 counter drop comment "badips:ban4"\n};
+    $t .= qq{        ip6 saddr \@badipv6 counter drop comment "badips:ban6"\n};
+    $t .= qq{        ip saddr \@feedv4 counter drop comment "badips:feed4"\n};
+    $t .= qq{        ip6 saddr \@feedv6 counter drop comment "badips:feed6"\n};
+    $t .= "    }\n}\n";
+    return $t;
+}
+
+sub chunked {    # one "<verb> element" statement per 500 elements
+    my ($verb, $set, $list) = @_;
+    my $out = '';
+    for (my $i = 0; $i < @$list; $i += 500) {
+        my $j = $i + 499 > $#$list ? $#$list : $i + 499;
+        $out .= "$verb element inet badips $set { " . join(', ', @{$list}[ $i .. $j ]) . " }\n";
+    }
+    return $out;
+}
+
+# Returns (transaction script, persistent file or undef).
+sub build {
+    my ($r) = @_;
+    # "table {}" then "delete table" is the classic idempotent replace: the
+    # delete never fails, and the new table appears in the same transaction.
+    my $swap = "table inet badips {}\ndelete table inet badips\n";
+    if ($r->{mode} eq 'replace') {
+        my $file = "#!/usr/sbin/nft -f\n"
+                 . "# bad-ips (role mode): static part of the inet badips table -- the never-block\n"
+                 . "# list, the interfaces it drops on and the rules. Rewritten by bad_ips_nft; do\n"
+                 . "# not edit. Bans and feed ranges are put back by the running daemon within\n"
+                 . "# one reconcile cycle after any reload.\n"
+                 . $swap . table_text($r, 0);
+        return ($swap . table_text($r, 1), $file);
+    }
+    my $s = '';
+    if ($r->{feedreset}) {
+        $s .= "flush set inet badips feedv4\nflush set inet badips feedv6\n";
+        $s .= chunked('add', 'feedv4', $r->{feed}{4}) . chunked('add', 'feedv6', $r->{feed}{6});
+    }
+    # destroy (not delete): an element that expired since the daemon looked is not an error
+    $s .= chunked('destroy', 'badipv4', $r->{unban}{4}) . chunked('destroy', 'badipv6', $r->{unban}{6});
+    $s .= chunked('add', 'badipv4', $r->{ban}{4}) . chunked('add', 'badipv6', $r->{ban}{6});
+    return ($s, undef);
+}
+
+sub run_nft_script {
+    my ($check_only, $script) = @_;
+    my $pid = open(my $to, '|-');
+    fail("cannot fork: $!") unless defined $pid;
+    if (!$pid) {
+        exec { $NFT } $NFT, ($check_only ? ('-c') : ()), '-f', '-';
+        exit 127;
+    }
+    print {$to} $script;
+    close $to;
+    return $? == 0;
+}
+
+sub write_persistent {
+    my ($text) = @_;
+    my $tmp = "$PERSIST.tmp.$$";
+    open(my $fh, '>', $tmp) or fail("cannot write $tmp: $!");
+    print {$fh} $text;
+    close $fh or fail("cannot write $tmp: $!");
+    chmod 0644, $tmp;
+    rename $tmp, $PERSIST or fail("cannot rename $tmp: $!");
+}
+
 my $action = shift @ARGV // usage();
 
-if ($action eq 'list-json') {
+if ($action eq 'state') {
+    usage() if @ARGV;
+    exec { $NFT } $NFT, '-j', 'list', 'table', @TABLE;
+}
+elsif ($action eq 'remove') {
+    # A host that stops blocking (role report/off, or watch mode) must not
+    # keep enforcing stale bans: drop the table and its persistent file.
+    usage() if @ARGV;
+    unlink $PERSIST;
+    run_nft_script(0, "table inet badips {}\ndelete table inet badips\n") or fail("nft failed to remove the table");
+    exit 0;
+}
+elsif ($action eq 'render' || $action eq 'sync') {
+    usage() if @ARGV;
+    my $req = read_request(\*STDIN);
+    my ($script, $file) = build($req);
+    if ($action eq 'render') {
+        print "### persistent\n", ($file // ''), "### transaction\n", $script;
+        exit 0;
+    }
+    exit 0 unless length $script;
+    run_nft_script(1, $script) or fail("nft rejected the change; nothing was changed");
+    # The persistent file is loaded by every later `systemctl reload nftables`
+    # and at boot: check it too, so a bad one can never take the host's whole
+    # firewall load down with it.
+    run_nft_script(1, $file) or fail("nft rejected the persistent file; nothing was changed")
+        if defined $file;
+    if (defined $file) {
+        mkdir '/etc/nftables.d' unless -d '/etc/nftables.d';
+        write_persistent($file);
+    }
+    run_nft_script(0, $script) or fail("nft failed to apply the change");
+    exit 0;
+}
+elsif ($action eq 'list-json') {
     usage() if @ARGV;
     exec { $NFT } $NFT, '-j', 'list', 'ruleset';
 }

@@ -33,6 +33,17 @@ for arg in "$@"; do
     esac
 done
 
+# Role mode (4.0): the daemon builds and repairs its own table through
+# bad_ips_nft, with the never-block list and interface limits from its
+# configuration. This 3.x table (no never-block entries, every interface)
+# must not be written over it.
+if perl -I/usr/local/lib/site_perl -MBadIPs::Engine::Config -e \
+    'exit(defined BadIPs::Engine::Config::role_from_files(conf_main => "/usr/local/etc/badips.conf", conf_dir => "/usr/local/etc/badips.d") ? 0 : 1)' \
+    2>/dev/null; then
+    echo "bad-ips role mode: the daemon manages its own nftables table; nothing to do here"
+    exit 0
+fi
+
 # Check root
 if [[ $EUID -ne 0 ]]; then
    echo -e "${RED}Error: This script must be run as root${NC}"

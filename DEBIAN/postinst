@@ -78,6 +78,20 @@ EOF
     fi
 fi
 
+# ============================================================================
+# ROLE MODE (4.0): a "role = block | report | off" in the configuration means
+# the configuration is managed (e.g. by a fleet installer that wrote it BEFORE
+# installing this package), and the role decides the service state. Asked of
+# the daemon's own config loader, so it reads the files exactly as the daemon
+# will. Empty = legacy (3.x) mode, which behaves exactly as before.
+# ============================================================================
+ROLE=$(perl -I/usr/local/lib/site_perl -MBadIPs::Engine::Config -e \
+    'print BadIPs::Engine::Config::role_from_files(conf_main => "/usr/local/etc/badips.conf", conf_dir => "/usr/local/etc/badips.d") // ""' \
+    2>/dev/null || true)
+if [ -n "$ROLE" ]; then
+    echo "Role mode: role = $ROLE (the configuration is managed; no standalone setup)"
+fi
+
 # Load service user configuration (created by installer or use default)
 if [ -f /etc/default/bad_ips ]; then
     . /etc/default/bad_ips
@@ -175,7 +189,7 @@ detect_admin_ips() {
     } | sed 's/%.*//' | sort -u
 }
 
-if [ ! -f "$CONF_MAIN" ] && [ -f "$CONF_TEMPLATE" ]; then
+if [ -z "$ROLE" ] && [ ! -f "$CONF_MAIN" ] && [ -f "$CONF_TEMPLATE" ]; then
     echo "Creating $CONF_MAIN from template (standalone mode)..."
     ADMIN_V4=""
     ADMIN_V6=""
@@ -311,14 +325,20 @@ echo "✓ Systemd drop-in configuration created"
 # ============================================================================
 # Only the nftables table/sets/chain here; the service itself is handled at
 # the end of this script. (The service unit also refreshes this on start.)
-echo "Creating nftables infrastructure..."
-
-if /usr/local/sbin/bad_ips_installer.sh --infra-only; then
-    echo "✓ nftables infrastructure created successfully"
+if [ -n "$ROLE" ]; then
+    # Role mode: only the block role has a firewall table, and the daemon
+    # builds it itself (through bad_ips_nft) when it starts.
+    echo "Role mode: not creating the legacy nftables table"
 else
-    echo "ERROR: Failed to create nftables infrastructure"
-    echo "Fix the error above, then run: sudo /usr/local/sbin/bad_ips_installer.sh"
-    exit 1
+    echo "Creating nftables infrastructure..."
+
+    if /usr/local/sbin/bad_ips_installer.sh --infra-only; then
+        echo "✓ nftables infrastructure created successfully"
+    else
+        echo "ERROR: Failed to create nftables infrastructure"
+        echo "Fix the error above, then run: sudo /usr/local/sbin/bad_ips_installer.sh"
+        exit 1
+    fi
 fi
 
 # Run database migration if database exists
@@ -340,7 +360,7 @@ systemctl daemon-reload
 # ============================================================================
 # 7. Configuration upgrades (pre-existing badips.conf only)
 # ============================================================================
-if [ "$CREATED_CONFIG" = "0" ] && [ -f "$CONF_MAIN" ]; then
+if [ -z "$ROLE" ] && [ "$CREATED_CONFIG" = "0" ] && [ -f "$CONF_MAIN" ]; then
     echo "Configuration file already exists at $CONF_MAIN"
     echo "To upgrade: review changes in $CONF_TEMPLATE if needed"
 
@@ -375,9 +395,37 @@ fi
 # ============================================================================
 # 8. Service state
 # ============================================================================
+# Role mode: the role decides -- block/report run, off stays disabled.
 # Fresh install (we just created the config): enable and start.
 # Upgrade/reinstall: restore the state saved by prerm.
-if [ "$CREATED_CONFIG" = "1" ]; then
+if [ -n "$ROLE" ]; then
+    case "$ROLE" in
+        block|report)
+            systemctl enable bad_ips.service >/dev/null 2>&1 || true
+            if /usr/local/sbin/bad_ips --test-config >/dev/null 2>&1; then
+                systemctl restart bad_ips.service || \
+                    echo "WARNING: bad_ips.service failed to start; see: journalctl -u bad_ips.service -n 50"
+                echo "✓ bad_ips.service enabled and (re)started (role = $ROLE)"
+            else
+                # Don't fail the package install; the daemon would refuse to start anyway
+                echo "WARNING: the configuration has errors; not starting bad_ips.service:"
+                /usr/local/sbin/bad_ips --test-config 2>&1 | grep -E 'ERROR' || true
+            fi
+            ;;
+        off)
+            systemctl disable --now bad_ips.service >/dev/null 2>&1 || true
+            # A node that stops blocking must not keep enforcing stale bans
+            if nft list table inet badips >/dev/null 2>&1 || [ -f /etc/nftables.d/99-badips.nft ]; then
+                /usr/local/sbin/bad_ips_nft remove && echo "✓ removed the inet badips table (role = off blocks nothing)"
+            fi
+            echo "✓ bad_ips.service installed and switched off (role = off)"
+            ;;
+        *)
+            echo "WARNING: unknown role '$ROLE'; leaving bad_ips.service stopped"
+            systemctl disable --now bad_ips.service >/dev/null 2>&1 || true
+            ;;
+    esac
+elif [ "$CREATED_CONFIG" = "1" ]; then
     echo "Enabling and starting bad_ips.service..."
     systemctl enable bad_ips.service >/dev/null 2>&1 || true
     if systemctl restart bad_ips.service; then

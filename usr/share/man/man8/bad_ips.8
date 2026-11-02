@@ -1,15 +1,39 @@
-.TH BAD_IPS 8 "October 2026" "Bad IPs 3.8.0" "System Administration"
+.TH BAD_IPS 8 "November 2026" "Bad IPs 4.0.0" "System Administration"
 .SH NAME
 bad_ips \- distributed IP blocking system with centralized database
 .SH SYNOPSIS
 .B bad_ips
 [\fB\-\-test\-config\fR]
 [\fB\-\-dry\-run\fR]
+.br
+.B bad_ips unban
+.I address
+[\fB\-\-hours\fR \fIN\fR] [\fB\-\-reason\fR \fItext\fR]
+.br
+.B bad_ips ban
+.I address
+[\fB\-\-for\fR \fIduration\fR] [\fB\-\-reason\fR \fItext\fR]
+.br
+.B bad_ips list
+[\fB\-\-limit\fR \fIN\fR]
+.br
+.B bad_ips why
+.I address
+.br
+.B bad_ips test\-rules
+.I logfile
+[\fB\-\-rule\fR \fIname\fR]
 .SH DESCRIPTION
 .B bad_ips
 monitors system logs for malicious activity and automatically blocks offending IP addresses using nftables. It features a centralized PostgreSQL database for threat intelligence sharing across multiple servers.
 .PP
 When Bad IPs detects malicious activity on one server, that threat is immediately shared with all servers connected to the same database, providing distributed protection across your entire infrastructure.
+.PP
+When the configuration sets a
+.B role
+(see
+.BR "ROLE MODE" ),
+the 4.0 role-mode engine runs instead: report hosts watch their logs and report to the shared ban list, and one block host (an internet edge) drops listed addresses on chosen interfaces. Without a role, the 3.x daemon described in the rest of this page runs exactly as before.
 .PP
 .B "ALPHA STATUS:"
 This software is currently in alpha testing. While it is being actively tested on live production servers, it may contain bugs and the configuration format may change in future releases. Use with appropriate caution and testing in your environment.
@@ -19,7 +43,34 @@ This software is currently in alpha testing. While it is being actively tested o
 Test the configuration file syntax and detector patterns without starting the service. Useful for validating changes before applying them.
 .TP
 .BR \-\-dry\-run
-Run in dry-run mode where IPs are detected but not actually blocked. Useful for testing pattern matching and troubleshooting.
+Run in dry-run mode where IPs are detected but not actually blocked. Useful for testing pattern matching and troubleshooting. In role mode this is the same as
+.BR "dry_run = 1" :
+the firewall is never touched, and detections are still reported.
+.SH COMMANDS
+These work in role mode only, and talk to the shared ban list, so they need the database settings (run them with sudo on a host that has them). The block host applies a change within one reconcile cycle (30 seconds by default).
+.TP
+.BI "unban " address
+Ends every active ban on the address, from every host, and exempts it for
+.B \-\-hours
+(default 24) so the next matching log line does not ban it straight back. The exemption is recorded with
+.B \-\-reason
+and the invoking user.
+.TP
+.BI "ban " address
+A manual ban for
+.B \-\-for
+(e.g. 90s, 30m, 12h, 7d, 2w; default 7d). Refused for never-block addresses. Ends any exemption on the address.
+.TP
+.B list
+Active bans, newest first, with the hosts and rules that reported them.
+.TP
+.BI "why " address
+Every report of the address (host, rule, hit count, the matching log lines, when the ban ends) and its exemption history. Also says when the address is on this host's never-block list.
+.TP
+.BI "test\-rules " logfile
+Runs the configured rules over a log file and prints what would be detected. Touches neither the database nor the firewall, and runs every rule regardless of its own source path, so one sample file can be checked against all rules;
+.B \-\-rule
+limits it to one.
 .SH FILES
 .TP
 .I /usr/local/etc/badips.conf
@@ -61,6 +112,130 @@ it only creates the infrastructure; the service unit runs it that way (as root) 
 .TP
 .I /usr/share/doc/bad-ips/
 Documentation directory containing README and configuration guides.
+.SH ROLE MODE
+Role mode is chosen by setting
+.B role
+in
+.B [global]
+(or
+.BR [host:\fIshortname\fB] ,
+which always wins over
+.BR [global] ).
+The same files are read as in 3.x \(em badips.conf, then badips.d/*.conf in sorted order \(em but only these sections count:
+.BR [global] ,
+.BR [host:\fIname\fB] ,
+.BR [rule:\fIname\fB] ,
+.BR [feed:\fIname\fB] .
+The legacy
+.BR [detector:*] ,
+.B [Plugins:*]
+and
+.B [PublicBlocklistPlugins:*]
+sections are ignored and listed by
+.BR \-\-test\-config .
+Any configuration error makes the daemon refuse to start (and a reload with errors keeps the running configuration).
+.SS Roles
+.TP
+.B role = report
+Watch logs and report detections to the shared ban list. Never touches the local firewall. Needs the database settings.
+.TP
+.B role = block
+The same, plus: read the whole shared list and the public feeds, and keep the kernel's
+.B inet badips
+table equal to them. Without database settings it blocks its own detections only.
+.TP
+.B role = off
+Do nothing; the package installs the service disabled.
+.SS Settings
+.TP
+.B dry_run
+0 or 1 (default 0). Watch mode: everything except touching the firewall.
+.TP
+.BR never_block_cidrs ", " never_block_cidrs_v6
+Comma-separated networks (IPv4 and IPv6 may go in either key) that are never reported and never blocked, on top of a built-in floor: 0.0.0.0/8, 10.0.0.0/8, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 224.0.0.0/4, 240.0.0.0/4, ::/128, ::1/128, ::ffff:0:0/96, fc00::/7, fe80::/10, ff00::/8. An entry (ban or feed range) that OVERLAPS any of these in either direction is refused \(em a range that contains a never-block network is refused as surely as an address inside one. An invalid entry refuses the whole configuration.
+.TP
+.B block_interfaces
+Comma-separated interface names the block role drops on (e.g. the internet-facing ones). Empty means every interface.
+.TP
+.B dns_accept
+0 or 1 (default 1). Accept DNS (port 53, TCP and UDP) ahead of the drops, so an authoritative DNS server never stops answering a banned address \(em its clients are mostly shared resolvers.
+.TP
+.BR db_host ", " db_port ", " db_name ", " db_user ", " db_password ", " db_ssl_mode ", " db_schema
+The shared ban list. All of host, name, user and password, or none.
+.B db_schema
+sets the search_path after connecting.
+.B db_ssl_mode
+defaults to prefer.
+.TP
+.BR reconcile_interval " (30), " push_interval " (5), " exemption_refresh " (60), " sleep_time " (2), " heartbeat " (300)"
+Seconds between firewall reconciles (block role), detection pushes, exemption refreshes, loop passes and heartbeat log lines.
+.TP
+.BR backread_bytes " (2 MB), " max_read_bytes " (8 MB), " queue_max " (5000)"
+How far back a log file is read on a fresh start (a saved position is used when the file is the same one), the most read per pass, and the most detections held while the database is unreachable (the oldest are dropped beyond it).
+.TP
+.BR state_dir " (/var/lib/bad_ips), " cache_dir " (/var/cache/badips), " host_name
+Where log positions and feed caches live, and the name this host reports as (default: the short hostname).
+.SS Rules
+Each
+.BI [rule: name ]
+section is one rule; a later file's section with the same name replaces it whole, and
+.B active = 0
+switches it off. The shipped rules are in badips.d/60-rules.conf.
+.TP
+.B source
+One or more log files (absolute paths, same format), or
+.B journal
+= one systemd unit (not both). A rule only runs where its source exists.
+.TP
+.B match
+A Perl regular expression that MUST capture the client address as
+.BR (?<ip>...) ,
+pinned to a fixed place in the line: usernames, URLs and user agents are attacker-controlled, and a pattern that takes the first address it finds lets an attacker get any address banned. An optional
+.B (?<n>\ed+)
+capture counts the line as n hits (capped at
+.BR max_weight ,
+default 10).
+.TP
+.BR count ", " window ", " ban
+A detection is
+.B count
+hits within
+.B window
+seconds, measured by each line's own timestamp; the ban lasts
+.B ban
+seconds (60 s to 365 days) from the last hit.
+.TP
+.B format
+How to read the line's time: rfc3339, nginx, syslog, journal or auto (default).
+.TP
+.B service
+A label stored with the report.
+.SS Feeds
+Each
+.BI [feed: name ]
+section is a public blocklist, used by the block role only:
+.B urls
+(comma-separated, "CIDR ; comment" lines),
+.B interval
+(seconds, at least 3600, default 86400) and
+.B min_entries
+(default 10). Each URL is fetched at most once per interval with a conditional GET and cached; a download that parses to fewer than min_entries, or shrinks to under half the previous copy, is refused and the previous copy kept. Ranges broader than /8 (IPv4) or /16 (IPv6) are dropped. Feed entries are never written to the shared list.
+.SS Firewall (block role)
+The table is
+.B inet badips
+with sets
+.BR badipv4 / badipv6
+(single addresses, with timeouts),
+.BR feedv4 / feedv6
+and
+.BR never_block / never_block_v6
+(intervals), and one chain on prerouting at priority \-150: accept anything not arriving on
+.BR block_interfaces ,
+accept never-block, accept DNS, then drop bans and feed ranges. Every reconcile it compares the table with what it should be: when the table is missing or its structure differs it is rebuilt in one atomic transaction; otherwise only the differences are applied. The static part (never-block list, interfaces, rules) is also written to /etc/nftables.d/99-badips.nft, so a plain nftables reload restores never-block together with the table; bans and feed ranges come back on the next reconcile. A starting node loads every active ban with its real end time. Element timeouts are capped at 30 days and re-extended as they run down.
+.SS Shared ban list
+Detections are reported in one transaction per push; a re-ban keeps the later end time, so a short ban never cuts a longer one. A database outage only delays sharing: detections queue (bounded by
+.BR queue_max )
+and the block role keeps enforcing the last list it read plus its own detections. Unban adds an exemption; once the shared list has a ban, the list decides, so an unban takes effect even for the block host's own detection.
 .SH CONFIGURATION
 .SS Main Configuration
 Edit
@@ -227,7 +402,7 @@ section, where
 .I shortname
 is the first component of the server's hostname (before any dot). This allows a single shared config to be deployed across servers with per-host differences.
 .PP
-Example — increase lookback only on the mail server:
+Example \(em increase lookback only on the mail server:
 .PP
 .RS
 .nf
@@ -740,6 +915,12 @@ for verbose logging including:
 - Queue depths and statistics
 .RE
 .SH DATABASE SCHEMA
+Role mode applies /usr/local/share/bad_ips/schema.sql, which creates the
+.B jailed_ips
+table below (unchanged from 3.x, so 3.x hosts keep working against it) and an
+.B exemptions
+table: ip (inet; an address or a network), until_at, reason, created_by, created_at (epoch seconds). Apply it as the role that should own the tables, with search_path set to the schema.
+.PP
 Bad IPs uses the
 .B jailed_ips
 table in PostgreSQL:
