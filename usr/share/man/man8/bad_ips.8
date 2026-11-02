@@ -1,4 +1,4 @@
-.TH BAD_IPS 8 "June 2026" "Bad IPs 3.7.0" "System Administration"
+.TH BAD_IPS 8 "October 2026" "Bad IPs 3.8.0" "System Administration"
 .SH NAME
 bad_ips \- distributed IP blocking system with centralized database
 .SH SYNOPSIS
@@ -372,13 +372,35 @@ or
 = 1 to cache the log file position between fetches (default: 1)
 .br
 .B block_after_n_attempts
-= number of pattern matches from a single IP before blocking (default: 1)
+= number of \fBbad_login_pattern\fR matches from a single IP, within \fBattempt_window\fR seconds, before that IP is blocked (default: 1). Honoured as of 3.8.0; earlier releases parsed this key but never acted on it, so any single match blocked immediately.
 .br
-.B block_duration
-= how long in seconds to block a detected IP (default: inherits global \fBblocking_time\fR)
+.B attempt_window
+= seconds over which matches are counted toward \fBblock_after_n_attempts\fR (default: 600). The tally for an address resets once the window elapses, and is cleared outright by a successful login.
+.br
+.B good_login_grace
+= seconds for which a successful login protects an address from being blocked (default: 3600)
 .br
 .B bad_login_pattern_01, bad_login_pattern_02, \fR...\fB bad_login_pattern_NN
-= detection patterns. Format: \fIShort Description:::Regex\fR. The description is used in logs; the regex is matched against each log line. IP is extracted from the line after a match.
+= attack detection patterns. Format: \fIShort Description:::Regex\fR. The description is used in logs; the regex is matched against each log line.
+.br
+.B good_login_pattern_01, good_login_pattern_02, \fR...\fB good_login_pattern_NN
+= successful-login patterns, same \fIShort Description:::Regex\fR format. These are tested \fBbefore\fR the bad patterns and win outright, so a line proving a real user authenticated is never counted as an attack. The matching address is then exempt from blocking for \fBgood_login_grace\fR seconds and any accumulated failure tally for it is discarded.
+.PP
+Take care matching ordinary disconnects. A bare
+.I Connection closed by <ip> [preauth]
+or
+.I Connection reset by <ip> [preauth]
+is written whenever a client drops the connection during the handshake \(em connection sharing, an editor's remote plugin, or a flaky mobile link will all produce it \(em and is not evidence of an attack. Matching it as a bad pattern locks out legitimate users. Prefer the
+.I Connection closed by authenticating user
+variant, which names a username and so indicates a real authentication attempt.
+.PP
+A per-plugin
+.B block_duration
+is
+.B not
+implemented: how long a block lasts is set by the global
+.B blocking_time
+in \fIbadips.conf\fR.
 .RE
 .PP
 .B Configuration Example
@@ -394,10 +416,18 @@ journal_unit = ssh.service, sshd.service
 log_paths = /var/log/auth.log, /var/log/secure
 initial_fetch = 7200
 fetch_interval = 2
-block_after_n_attempts = 1
+
+good_login_pattern_01 = Accepted publickey:::Accepted publickey for .* from
+good_login_pattern_02 = Accepted password:::Accepted password for .* from
+good_login_grace = 3600
+
 bad_login_pattern_01 = Failed password:::Failed password for .* from
 bad_login_pattern_02 = Invalid user:::Invalid user .* from
-bad_login_pattern_03 = Preauth closed:::Connection closed by .* \e[preauth\e]
+bad_login_pattern_03 = Authentication Failure:::pam_unix\e(sshd:auth\e): authentication failure
+bad_login_pattern_04 = Preauth close after auth attempt:::Connection closed by authenticating user \eS+ .* \e[preauth\e]
+
+block_after_n_attempts = 3
+attempt_window = 600
 .fi
 .RE
 .SS Postfix Plugin

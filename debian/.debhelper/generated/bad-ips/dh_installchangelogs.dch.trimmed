@@ -1,3 +1,41 @@
+bad-ips (3.8.0) unstable; urgency=medium
+
+  * GeneralLogMonitor: recognise successful logins. New
+    good_login_pattern_NN keys mark log lines that prove a real user
+    authenticated. They are tested before the bad patterns and win outright,
+    and the matching address is then exempt from blocking for
+    good_login_grace seconds (default 3600) with any accumulated failure
+    tally discarded. Previously the daemon had no notion of a successful
+    login at all: a key-based login followed seconds later by a harmless
+    pre-auth disconnect was enough to block the legitimate user.
+  * GeneralLogMonitor: honour block_after_n_attempts. The key was parsed and
+    documented but never read by any code, so a single pattern match always
+    blocked immediately. Matches are now counted per address over the new
+    attempt_window (default 600 seconds).
+  * GeneralLogMonitor: extract only the client address from a matching line.
+    The previous global match harvested every address on the line, so any
+    line naming more than one host could block innocent bystanders.
+    Addresses are now located by position relative to a known anchor
+    (rhost=, rip=, client:, "from", "closed/reset by", bracketed forms),
+    falling back to the first address rather than all of them.
+  * 10-sshd.conf: stop matching bare "Connection closed by" and "Connection
+    reset by" pre-auth disconnects. These are ordinary client behaviour, not
+    attacks, and matching them locked out real users. The "Connection closed
+    by authenticating user" variant is kept, since it names a username.
+  * 10-sshd.conf: escape the parentheses in the pam_unix(sshd:auth) pattern.
+    Unescaped they formed a capture group, so the rule silently never
+    matched a real PAM line. Restore the "no matching key exchange method
+    found" rule, which had been lost to a duplicated bad_login_pattern_08
+    key. Default threshold is now 3 matches in 600 seconds.
+  * Document good_login_pattern_NN, good_login_grace and attempt_window in
+    the man page and CONFIGURATION.md, correct the stale SSH detector
+    example, and note that per-plugin block_duration is not implemented.
+  * Sync the stale VERSION file and DEBIAN/control with debian/changelog;
+    they still read 3.6.1 while the package was built as 3.7.0, so the
+    installed /usr/share/doc/bad-ips/VERSION disagreed with dpkg.
+
+ -- Gardner <gardner@homelab>  Sat, 03 Oct 2026 10:57:21 -0500
+
 bad-ips (3.7.0) unstable; urgency=medium
 
   * Release v3.7.0

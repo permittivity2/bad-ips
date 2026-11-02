@@ -8,7 +8,7 @@ use Regexp::Common qw(net);  # Exports %RE{net}
 use Data::Dumper;
 use List::Util qw(any);
 use JSON qw(decode_json);
-our $VERSION = '3.7.0';
+our $VERSION = '3.8.0';
 
 my $log = get_logger();
 
@@ -54,26 +54,57 @@ sub new {
     $self->{fetch_interval} = $plugin_confs->{fetch_interval} || 60;
     $self->{file_positions} = {};
 
-    # Extract the matching patterns for failed login attempts
-    # Creates a hash like:
-    # { 'short_description' => 'regex_pattern' }
-    # Pushes into $self->{patterns}
+    # Extract the detection patterns. Two kinds are recognised, each stored
+    # as { 'short_description' => 'regex_pattern' }:
+    #   bad_login_pattern_NN  -> $self->{patterns}       (evidence of attack)
+    #   good_login_pattern_NN -> $self->{good_patterns}  (evidence a real
+    #                                                     user authenticated)
     # Expects config entries like:
-    #  bad_login_pattern_01 = Failed password:::Failed password for .* from
+    #  bad_login_pattern_01  = Failed password:::Failed password for .* from
+    #  good_login_pattern_01 = Accepted publickey:::Accepted publickey for .* from
     #  Splits on ::: to get description and pattern
     my %patterns;
+    my %good_patterns;
     for my $key (keys %$plugin_confs) {
-        if ($key =~ /^bad_login_pattern_\d+$/) {
-            my $value = $plugin_confs->{$key};
-            my ($desc, $pattern) = split(/:::/, $value, 2);
-            if (defined $desc && defined $pattern) {
-                $patterns{$desc} = $pattern;
-            } else {
-                $log->warn("Invalid bad_login_pattern entry '$value' in plugin section '$self->{plugin_section}'");
-            }
+        my $target;
+        if    ($key =~ /^bad_login_pattern_\d+$/)  { $target = \%patterns }
+        elsif ($key =~ /^good_login_pattern_\d+$/) { $target = \%good_patterns }
+        else                                       { next }
+
+        my $value = $plugin_confs->{$key};
+        my ($desc, $pattern) = split(/:::/, $value, 2);
+        if (defined $desc && defined $pattern) {
+            $target->{$desc} = $pattern;
+        } else {
+            $log->warn("Invalid $key entry '$value' in plugin section '$self->{plugin_section}'");
         }
     }
-    $self->{patterns} = \%patterns;
+    $self->{patterns}      = \%patterns;
+    $self->{good_patterns} = \%good_patterns;
+
+    # How long a successful login protects an address from being blocked.
+    # Without this the daemon had no notion of a legitimate user at all: a
+    # key-based login followed seconds later by a harmless pre-auth disconnect
+    # was enough to lock the real user out.
+    $self->{good_login_grace} = $plugin_confs->{good_login_grace};
+    $self->{good_login_grace} = 3600 unless defined $self->{good_login_grace} && $self->{good_login_grace} =~ /^\d+$/;
+
+    # block_after_n_attempts was previously documented and shipped in the
+    # config but never read by any code, so every single match blocked
+    # immediately. It is now honoured, counted per address over
+    # attempt_window seconds.
+    $self->{block_after_n_attempts} = $plugin_confs->{block_after_n_attempts};
+    $self->{block_after_n_attempts} = 1
+        unless defined $self->{block_after_n_attempts}
+            && $self->{block_after_n_attempts} =~ /^\d+$/
+            && $self->{block_after_n_attempts} >= 1;
+
+    $self->{attempt_window} = $plugin_confs->{attempt_window};
+    $self->{attempt_window} = 600 unless defined $self->{attempt_window} && $self->{attempt_window} =~ /^\d+$/;
+
+    # Per-address state: last successful login, and failure tallies.
+    $self->{good_ips} = {};
+    $self->{attempts} = {};
 
     my %files_to_monitor = map { $_ => 1 } @{ $self->{file_paths} };
     $self->{files_to_monitor} = \%files_to_monitor;
@@ -142,6 +173,7 @@ sub run {
         }
         # Enqueue IPs found in new log lines
         $self->_add_ips_to_queue( lines => $lines );
+        $self->_prune_state();
     }
 }
 
@@ -150,26 +182,69 @@ Description:
     Helper sub to enqueue IPs found in log lines.
 Arguments:
     lines => arrayref of hashrefs:
-        [ { message => "...", description => "..." }, ... ]
+        [ { message => "...", description => "...", kind => 'bad'|'good' }, ... ]
 Returns:
-    None.
+    1.
 =cut
 sub _add_ips_to_queue {
     my ($self, %args) = @_;
     my $lines = $args{lines} || [];
+    my $now   = time();
+    my $grace = $self->{good_login_grace};
+    my $need  = $self->{block_after_n_attempts};
 
-    # get unique IPs from lines
-    my %unique_ips;
+    # Pass 1 - record successful logins before looking at any failure.
+    # Order matters: a success and a failure can easily land in the same
+    # batch, which is exactly what locked real users out before. Recording
+    # successes first means the failure pass already knows the address is
+    # trusted.
     for my $line (@$lines) {
-        my $message = $line->{message} || '';
-        while ( $message =~ /($RE{net}{IPv4}|$RE{net}{IPv6})/g ) {
-            $unique_ips{$1} = 1;
+        next unless ( $line->{kind} || 'bad' ) eq 'good';
+        my $desc = $line->{description} || 'successful login';
+        for my $ip ( $self->_extract_client_ips( $line->{message} || '' ) ) {
+            $self->{good_ips}->{$ip} = $now;
+            delete $self->{attempts}->{$ip};
+            $self->{log}->info("Successful login from $ip ($desc); exempt from blocking for ${grace}s");
         }
     }
-    for my $ip (keys %unique_ips) {
-        $self->{log}->info("Enqueuing IP $ip found in logs");
-        $self->enqueue_ip( ip => $ip, reason => 'Failed login attempts' );
+
+    # Pass 2 - failures.
+    for my $line (@$lines) {
+        next unless ( $line->{kind} || 'bad' ) eq 'bad';
+        my $desc = $line->{description} || 'unknown pattern';
+
+        for my $ip ( $self->_extract_client_ips( $line->{message} || '' ) ) {
+
+            my $good_at = $self->{good_ips}->{$ip};
+            if ( defined $good_at && ( $now - $good_at ) <= $grace ) {
+                my $ago = $now - $good_at;
+                $self->{log}->info(
+                    "Not blocking $ip ($desc): successful login ${ago}s ago is inside the ${grace}s grace window"
+                );
+                next;
+            }
+
+            my $rec = $self->{attempts}->{$ip} ||= { count => 0, first => $now };
+            if ( ( $now - $rec->{first} ) > $self->{attempt_window} ) {
+                $rec->{count} = 0;
+                $rec->{first} = $now;
+            }
+            $rec->{count}++;
+
+            if ( $rec->{count} >= $need ) {
+                $self->{log}->info("Enqueuing IP $ip after $rec->{count}/$need attempt(s) ($desc)");
+                $self->enqueue_ip( ip => $ip, reason => "Failed login attempts: $desc" );
+                delete $self->{attempts}->{$ip};
+            }
+            else {
+                $self->{log}->info(
+                    "IP $ip at $rec->{count}/$need attempt(s) within $self->{attempt_window}s ($desc); not blocking yet"
+                );
+            }
+        }
     }
+
+    return 1;
 }
 
 =head2 _recurring_fetch_lines
@@ -489,13 +564,110 @@ Returns:
 
 sub _matchs_patterns {
     my ($self, $message) = @_;
-    for my $pattern (keys %{ $self->{patterns} }) {
-        if ( $message =~ /$self->{patterns}->{$pattern}/ ) {
-            my $desc = $pattern;
-            return { message => $message, description => $desc };
+
+    # Successful-login patterns are checked first and win outright. A line
+    # proving a real user got in must never be counted as an attack, whatever
+    # order the hash keys happen to come back in.
+    for my $desc (keys %{ $self->{good_patterns} }) {
+        if ( $message =~ /$self->{good_patterns}->{$desc}/ ) {
+            return { message => $message, description => $desc, kind => 'good' };
         }
     }
+
+    for my $desc (keys %{ $self->{patterns} }) {
+        if ( $message =~ /$self->{patterns}->{$desc}/ ) {
+            return { message => $message, description => $desc, kind => 'bad' };
+        }
+    }
+
     return undef;
+}
+
+=head2 _extract_client_ips
+
+Description:
+    Return the client address a log line is actually about.
+
+    This used to harvest every address appearing anywhere in a matching line
+    via a global match, which meant any line naming more than one host (a
+    relay plus its client, a local interface address in a Postfix connect
+    line, a forwarded-for chain) got all of them blocked, including innocent
+    bystanders.
+
+    Addresses are now located by their position relative to a known anchor
+    word, most specific anchor first, and only the first match is returned.
+    When no anchor is recognised we fall back to the first address in the
+    line rather than all of them.
+
+Arguments:
+    (method) $self – object instance.
+    $message       => string log message.
+
+Returns:
+    List of client IP addresses - normally exactly one, empty if none found.
+
+=cut
+
+sub _extract_client_ips {
+    my ($self, $message) = @_;
+    return () unless defined $message && length $message;
+
+    my $ip = qr/(?:$RE{net}{IPv4}|$RE{net}{IPv6})/;
+
+    # Ordered most specific first; each alternative must capture the client.
+    my @anchors = (
+        qr/rhost=($ip)/,                                                       # PAM
+        qr/\brip=($ip)/,                                                       # Dovecot
+        qr/\bclient:\s*($ip)/,                                                 # nginx
+        qr/\b(?:closed|reset)\s+by\s+(?:authenticating\s+user\s+\S+\s+)?($ip)/, # sshd disconnects
+        qr/\bfrom\s+(?:\S*?\[)?($ip)\]?/,                                      # sshd / postfix "from host[ip]"
+        qr/\bwith\s+($ip)/,                                                    # sshd "Unable to negotiate with ip"
+        qr/\bby\s+($ip)/,                                                      # generic "... by ip"
+        qr/\[($ip)\]/,                                                         # bracketed, e.g. unknown[ip]
+        qr/($ip)\s+port\s+\d+/,                                                # generic sshd shape
+    );
+
+    for my $anchor (@anchors) {
+        return ($1) if $message =~ $anchor;
+    }
+
+    if ( $message =~ /($ip)/ ) {
+        $self->{log}->debug("No client-IP anchor matched; using first address $1 in: $message");
+        return ($1);
+    }
+
+    return ();
+}
+
+=head2 _prune_state
+
+Description:
+    Drop per-address bookkeeping that has aged out, so the success and
+    failure tables cannot grow without bound on a busy host.
+
+Arguments:
+    (method) $self – object instance.
+
+Returns:
+    1.
+
+=cut
+
+sub _prune_state {
+    my ($self) = @_;
+    my $now = time();
+
+    for my $ip ( keys %{ $self->{good_ips} } ) {
+        delete $self->{good_ips}->{$ip}
+            if ( $now - $self->{good_ips}->{$ip} ) > $self->{good_login_grace};
+    }
+
+    for my $ip ( keys %{ $self->{attempts} } ) {
+        delete $self->{attempts}->{$ip}
+            if ( $now - $self->{attempts}->{$ip}->{first} ) > $self->{attempt_window};
+    }
+
+    return 1;
 }
 
 1;

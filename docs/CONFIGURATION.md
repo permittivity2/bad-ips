@@ -169,24 +169,92 @@ Detectors define which services to monitor and what patterns indicate bad behavi
 
 ### File Format
 
+Each file declares a plugin instance as its section header, followed by that
+plugin's keys:
+
 ```ini
-[global]
-journal_units = <systemd-units>  # Comma-separated
-file_sources = <log-files>       # Comma-separated
-bad_conn_patterns = <regex>      # Perl regex, one per line
+[Plugins:<PluginName>]
+active = 1                       # 1 to enable this instance
+name = <display name>            # used in logs and database records
+journal_unit = <systemd-units>   # comma-separated
+log_paths = <log-files>          # comma-separated
+monitor_method = auto            # journald | files | both | auto
 ```
+
+Detection patterns use the form `Short Description:::Regex`. The description
+appears in the logs; the regex is matched against each log line.
+
+### Pattern kinds
+
+`GeneralLogMonitor` recognises two kinds of pattern, and the distinction
+matters:
+
+| Key | Meaning |
+|---|---|
+| `bad_login_pattern_NN` | Evidence of an attack. Counts toward a block. |
+| `good_login_pattern_NN` | Evidence a real user authenticated. Tested **first** and wins outright. |
+
+When a good pattern matches, that address is exempt from blocking for
+`good_login_grace` seconds and any failure tally against it is discarded.
+Without good patterns the daemon has no concept of a legitimate user, and a
+successful login followed moments later by a harmless pre-auth disconnect is
+enough to lock the real user out.
+
+**Do not match ordinary disconnects.** A bare `Connection closed by <ip>
+[preauth]` or `Connection reset by <ip> [preauth]` is written any time a
+client drops the connection during the handshake — connection sharing, an
+editor's remote plugin, or a flaky mobile link all produce it. Prefer the
+`Connection closed by authenticating user` variant, which names a username
+and so reflects a real authentication attempt.
+
+### Thresholds
+
+| Key | Default | Meaning |
+|---|---|---|
+| `block_after_n_attempts` | `1` | Bad-pattern matches from one address needed to block it. |
+| `attempt_window` | `600` | Seconds over which those matches are counted. |
+| `good_login_grace` | `3600` | Seconds a successful login protects an address. |
+
+`block_after_n_attempts` is honoured as of **3.8.0**. Earlier releases parsed
+the key but never acted on it, so every single match blocked immediately.
+
+A per-plugin `block_duration` is **not** implemented — block length comes from
+the global `blocking_time` in `badips.conf`.
 
 ### Example: SSH Detector (10-sshd.conf)
 
 ```ini
-[global]
-journal_units = ssh.service,sshd.service
-bad_conn_patterns =
-    Failed password for .* from (\S+)
-    Connection closed by authenticating user .* (\S+) port \d+ \[preauth\]
-    Invalid user .* from (\S+)
-    Unable to negotiate .* from (\S+)
+[Plugins:GeneralLogMonitor]
+active = 1
+name = SSH
+log_paths = /var/log/auth.log, /var/log/secure
+journal_unit = ssh.service, sshd.service
+monitor_method = auto
+initial_fetch = 7200
+fetch_interval = 2
+
+# Evidence a real user got in
+good_login_pattern_01 = Accepted publickey:::Accepted publickey for .* from
+good_login_pattern_02 = Accepted password:::Accepted password for .* from
+good_login_grace = 3600
+
+# Evidence of an attack
+bad_login_pattern_01 = Failed password:::Failed password for .* from
+bad_login_pattern_02 = Invalid user:::Invalid user .* from
+bad_login_pattern_03 = Authentication Failure:::pam_unix\(sshd:auth\): authentication failure
+bad_login_pattern_04 = Preauth close after auth attempt:::Connection closed by authenticating user \S+ .* \[preauth\]
+
+block_after_n_attempts = 3
+attempt_window = 600
 ```
+
+Note the escaped parentheses in `pam_unix\(sshd:auth\)`. Unescaped, the
+parentheses form a regex capture group and the pattern silently never matches
+a real PAM log line.
+
+> The Postfix and Nginx examples below still describe an older
+> `[global] bad_conn_patterns` layout and have not been brought in line with
+> the shipped config files.
 
 ### Example: Postfix Detector (20-postfix.conf)
 
