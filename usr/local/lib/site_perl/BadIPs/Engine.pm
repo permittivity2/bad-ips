@@ -405,8 +405,13 @@ sub run {
     }
     $self->logger->info(sprintf 'bad-ips role mode started: role=%s%s host=%s rules=%d sources=%d database=%s%s',
         $s->{role}, ($s->{dry_run} ? ' (watch mode: the firewall is never touched)' : ''), $s->{host},
-        scalar @{ $s->{rules} }, scalar keys %{ $self->{sources} }, ($s->{db} ? "$s->{db}{host}:$s->{db}{port}" : 'none'),
+        scalar @{ $s->{rules} }, scalar keys %{ $self->{sources} }, ($s->{db} ? "$s->{db}{host}:$s->{db}{port}/$s->{db}{name}" : 'none'),
         (@{ $s->{block_interfaces} } ? " interfaces=@{ $s->{block_interfaces} }" : ''));
+    # where the settings that matter came from: a wrong file is visible here
+    my $f = $s->{from} || {};
+    $self->logger->info(sprintf 'settings from: role %s; never-block %s; database %s',
+        $f->{role} // '?', $f->{never_block_cidrs} // '(the built-in floor only)',
+        ($s->{db} ? "$s->{db}{user}\@$s->{db}{host}:$s->{db}{port}/$s->{db}{name} from " . ($f->{db_host} // '?') : 'none'));
 
     local $SIG{TERM} = sub { $self->{running} = 0 };
     local $SIG{INT}  = sub { $self->{running} = 0 };

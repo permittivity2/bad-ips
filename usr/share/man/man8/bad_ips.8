@@ -1,4 +1,4 @@
-.TH BAD_IPS 8 "November 2026" "Bad IPs 4.0.0" "System Administration"
+.TH BAD_IPS 8 "November 2026" "Bad IPs 4.0.1" "System Administration"
 .SH NAME
 bad_ips \- distributed IP blocking system with centralized database
 .SH SYNOPSIS
@@ -134,6 +134,22 @@ and
 sections are ignored and listed by
 .BR \-\-test\-config .
 Any configuration error makes the daemon refuse to start (and a reload with errors keeps the running configuration).
+.PP
+A later file replaces an earlier file's
+.B [global]
+value \(em except for the settings that decide what happens to traffic and where detections go:
+.BR role ,
+.BR dry_run ,
+.BR block_interfaces ,
+.BR never_block_cidrs ,
+.BR never_block_cidrs_v6 ,
+and the database settings
+.RB ( db_* )
+as one group. Each of those must come from ONE file. Two files that set one of them differently, or database settings split across two files, are a configuration error that names both files \(em never a silent choice by file name. The usual cause is a leftover
+.I badips.d/database.conf
+from an older install (since 4.0.1; found on a fleet whose every node had one, pointing at a dead database).
+.B \-\-test\-config
+shows which file each of them came from, and the daemon logs it at start.
 .SS Roles
 .TP
 .B role = report

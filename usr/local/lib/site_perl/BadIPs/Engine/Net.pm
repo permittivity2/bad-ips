@@ -8,7 +8,7 @@ package BadIPs::Engine::Net;
 # core Socket, so the engine needs no extra CPAN modules for this.
 #
 # Overlap, not containment, is the test that matters for safety: a feed
-# range of 23.116.0.0/16 does not sit *inside* the house's 23.116.91.64/29,
+# range of 192.0.0.0/16 does not sit *inside* the house's 192.0.2.64/29,
 # it *contains* it, and blocking it would cut the house off just the same.
 # ============================================================================
 

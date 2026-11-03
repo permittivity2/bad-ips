@@ -27,6 +27,16 @@ and the block host (the edge) adds `role = block` and
 file to change it, or set `active = 0` there to switch it off. The private,
 loopback, link-local and multicast ranges are always never-blocked.
 
+**One file each for what matters (4.0.1).** A later file normally replaces an
+earlier file's `[global]` value, but `role`, `dry_run`, `block_interfaces`,
+`never_block_cidrs`, `never_block_cidrs_v6` and the database settings (all the
+`db_*` keys, as one group) must each come from ONE file. Two files that
+disagree, or database settings split across files, refuse the configuration
+and name both files. The usual cause is a leftover `badips.d/database.conf`
+from an older install: it sorts after a `96-...` file, so under "a later file
+wins" it would silently replace the database you meant. `bad_ips --test-config`
+shows which file each of these came from.
+
 ## Main Configuration: badips.conf
 
 ### Quick Start

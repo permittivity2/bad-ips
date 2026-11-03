@@ -84,7 +84,7 @@ sub simulate_reload {
 }
 
 kernel_reset();
-my $never = BadIPs::Engine::NeverBlock->new('23.116.91.64/29', '198.51.100.45/32', '2001:db8:5400:2e7f::/64', '10.50.0.0/16');
+my $never = BadIPs::Engine::NeverBlock->new('192.0.2.64/29', '198.51.100.45/32', '2001:db8:5400:2e7f::/64', '10.50.0.0/16');
 my $fw = BadIPs::Engine::Firewall->new(runner => \&runner, ifaces => [qw(eth6 eth7)], dns_accept => 1, never => $never);
 
 my %bans = ('203.0.113.7' => $NOW + 3600, '2001:db8::7' => $NOW + 600);
@@ -96,7 +96,7 @@ ok $r->{ok}, 'first reconcile ok';
 like $r->{replaced}, qr/table missing/, 'a missing table is rebuilt';
 ok exists $K{sets}{badipv4}{'203.0.113.7'}, 'v4 ban in place';
 ok exists $K{sets}{badipv6}{'2001:db8::7'}, 'v6 ban in place';
-ok exists $K{sets}{never_block}{'23.116.91.64/29'}, 'house in never-block';
+ok exists $K{sets}{never_block}{'192.0.2.64/29'}, 'house in never-block';
 ok exists $K{sets}{never_block}{'198.51.100.45'}, 'offsite in never-block';
 ok !exists $K{sets}{never_block}{'10.50.0.0/16'}, 'an entry inside the floor\'s 10/8 is folded away (no overlapping elements)';
 is_deeply [ sort keys %{ $K{sets}{feedv4} } ], ['1.10.16.0/20'], 'a feed range inside another is folded away';
@@ -134,7 +134,7 @@ ok exists $K{sets}{badipv4}{'198.51.100.20'}, 'bans back';
 $K{sets}{never_block} = {};
 $r = do { $CLOCK = $NOW + 150; $fw->reconcile(bans => \%b2, feed => \@feed, now => $NOW + 150) };
 like $r->{replaced}, qr/never-block entries missing/, 'an emptied never-block set forces a rebuild';
-ok exists $K{sets}{never_block}{'23.116.91.64/29'}, 'house back in never-block';
+ok exists $K{sets}{never_block}{'192.0.2.64/29'}, 'house back in never-block';
 
 # --- structure differs ------------------------------------------------------------------
 push @{ $K{rules} }, 'someone:else';

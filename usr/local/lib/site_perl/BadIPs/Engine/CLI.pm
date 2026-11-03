@@ -174,14 +174,15 @@ errors. Also checks that the shared ban list is reachable.
 sub test_config {
     my (%a) = @_;
     my ($s, $err, $notes) = BadIPs::Engine::Config::load(conf_main => $a{conf_main}, conf_dir => $a{conf_dir});
-    printf "role:        %s%s\n", $s->{role} // '?', ($s->{dry_run} ? ' (watch mode: the firewall is never touched)' : '');
+    my $from = sub { my $f = ($s->{from} || {})->{ $_[0] }; return $f ? "  (from $f)" : '' };
+    printf "role:        %s%s%s\n", $s->{role} // '?', ($s->{dry_run} ? ' (watch mode: the firewall is never touched)' : ''), $from->('role');
     printf "host:        %s\n", $s->{host} // '?';
     if (($s->{role} // '') eq 'block') {
         printf "drops on:    %s\n", @{ $s->{block_interfaces} || [] } ? join(', ', @{ $s->{block_interfaces} }) : 'every interface';
         printf "dns:         %s\n", $s->{dns_accept} ? 'never blocked' : 'blocked like anything else';
     }
     if ($s->{never}) {
-        print  "never-block: ", join(', ', $s->{never}->cidrs), "\n";
+        print  "never-block: ", join(', ', $s->{never}->cidrs), $from->('never_block_cidrs'), "\n";
     }
     printf "rules:       %d\n", scalar @{ $s->{rules} || [] };
     for my $r (@{ $s->{rules} || [] }) {
@@ -191,7 +192,8 @@ sub test_config {
     }
     printf "feeds:       %s\n", join(', ', map { $_->{name} } @{ $s->{feeds} || [] }) || 'none';
     if ($s->{db}) {
-        printf "database:    %s:%s/%s as %s, schema %s\n", @{ $s->{db} }{qw(host port name user)}, $s->{db}{schema} // '(default)';
+        printf "database:    %s:%s/%s as %s, schema %s%s\n", @{ $s->{db} }{qw(host port name user)}, $s->{db}{schema} // '(default)',
+            $from->('db_host');
         if (!@$err) {
             my $st = BadIPs::Engine::Store->new(db => $s->{db}, host => $s->{host}, connect => $a{connect});
             my $act = $st->load_active(time);

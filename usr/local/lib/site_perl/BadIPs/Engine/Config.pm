@@ -6,9 +6,18 @@ package BadIPs::Engine::Config;
 # Reads the same INI files as the legacy daemon -- badips.conf, then
 # badips.d/*.conf in sorted order -- with these rules:
 #
-#   * [global] keys: a later file replaces an earlier file's value.
+#   * [global] keys: a later file replaces an earlier file's value -- EXCEPT
+#     the settings that decide what happens to traffic and where detections
+#     go (role, dry_run, block_interfaces, the never-block lists, and the
+#     database settings as a group). Each of those may come from ONE file:
+#     two files that disagree are refused, naming both. "A later file wins"
+#     would pick one by its file NAME, and the loser is usually a leftover.
+#     Found 2026-11-02: a purged 3.x install had left badips.d/database.conf
+#     (a dead database) on every node of a fleet, and "database.conf" sorts
+#     after "96-fleet-db.conf", so it silently won.
 #   * [host:<short hostname>] keys: applied after ALL [global] sections, so
-#     a host section always wins regardless of which file it is in.
+#     a host section always wins regardless of which file it is in (that is
+#     a deliberate per-host override, not a conflict).
 #   * [rule:NAME] and [feed:NAME]: merged BY NAME. A later file's section
 #     replaces the earlier one whole, and "active = 0" there switches it
 #     off. (3.x merged detector sections per file, so a later file could
@@ -29,6 +38,11 @@ use BadIPs::Engine::Net;
 use BadIPs::Engine::Rules;
 
 my %ROLES = map { $_ => 1 } qw(block report off);
+
+# One file each (see the header). The database settings are one group: host,
+# port, name, user and password from different files are never mixed.
+my @SINGLE = qw(role dry_run block_interfaces never_block_cidrs never_block_cidrs_v6);
+my @DBKEYS = qw(db_host db_port db_name db_user db_password db_schema db_ssl_mode);
 
 =head2 role_from_files(conf_main => ..., conf_dir => ...)
 
@@ -81,6 +95,46 @@ sub _merge_scalars {
     return \%g;
 }
 
+# Where each key of one layer ([global], or [host:<me>]) is set:
+# key => [ [file, value], ... ] in file order.
+sub _settings_by_file {
+    my ($raw, $section) = @_;
+    my %by;
+    for my $r (@$raw) {
+        next unless $r->{conf} && $r->{conf}{$section};
+        push @{ $by{$_} }, [ $r->{file}, $r->{conf}{$section}{$_} ] for sort keys %{ $r->{conf}{$section} };
+    }
+    return \%by;
+}
+
+sub _same { my ($v) = @_; $v //= ''; $v =~ s/\s*,\s*/,/g; $v =~ s/\A\s+|\s+\z//g; return $v }
+
+# The one-file-each rule, for one layer. Returns the errors.
+sub _conflicts {
+    my ($by, $where) = @_;
+    my @err;
+    for my $k (@SINGLE) {
+        my @set = @{ $by->{$k} || [] };
+        my %distinct = map { _same($_->[1]) => 1 } @set;
+        next unless keys %distinct > 1;
+        push @err, "$k is set differently by more than one file in $where: "
+            . join('; ', map { "$_->[0] says '$_->[1]'" } @set) . ' -- keep it in exactly one file';
+    }
+    my %dbfile;
+    for my $k (@DBKEYS) { $dbfile{ $_->[0] }{$k} = $_->[1] for @{ $by->{$k} || [] } }
+    if (keys %dbfile > 1) {
+        my $show = sub {
+            my ($f) = @_;
+            return "$f (" . join(', ', map { $_ eq 'db_password' ? 'db_password' : "$_=$dbfile{$f}{$_}" }
+                                       grep { exists $dbfile{$f}{$_} } @DBKEYS) . ')';
+        };
+        push @err, "the database settings in $where come from more than one file: "
+            . join('; ', map { $show->($_) } sort keys %dbfile)
+            . ' -- they must all come from one file (a leftover badips.d/database.conf from an older install is the usual cause)';
+    }
+    return @err;
+}
+
 =head2 load(conf_main => ..., conf_dir => ..., host => ...)
 
 Returns ($settings, \@errors, \@notes).
@@ -99,6 +153,13 @@ sub load {
     }
 
     my $g = _merge_scalars($raw, $host);
+
+    # one file each for what matters; and where every setting came from
+    my $gby = _settings_by_file($raw, 'global');
+    my $hby = _settings_by_file($raw, "host:$host");
+    push @err, _conflicts($gby, '[global]'), _conflicts($hby, "[host:$host]");
+    my %from = ((map { $_ => $gby->{$_}[-1][0] } keys %$gby), (map { $_ => $hby->{$_}[-1][0] } keys %$hby));
+
     my (%rules, %feeds, %ignored);
     for my $r (@$raw) {
         next unless $r->{conf};
@@ -113,7 +174,7 @@ sub load {
     }
     push @notes, "legacy sections ignored in role mode: " . join(', ', sort keys %ignored) if %ignored;
 
-    my %s = (host => $g->{host_name} // $host);
+    my %s = (host => $g->{host_name} // $host, from => \%from);
 
     # role
     my $role = $g->{role} // '';
@@ -166,6 +227,7 @@ sub load {
             password => $g->{db_password},
             sslmode  => $g->{db_ssl_mode} // 'prefer',
             schema   => $g->{db_schema},
+            from     => $from{db_host},
         };
         push @err, "db_port must be a port number" unless $s{db}{port} =~ /\A\d{1,5}\z/;
         push @err, "db_schema must be a plain identifier"

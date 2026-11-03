@@ -77,8 +77,14 @@ sub dbh {
         $self->_fail($now, $@);
         return undef;
     }
-    $self->_log(info => "shared ban list: connected") if $self->{last_err};
-    @{$self}{qw(dbh backoff last_ok last_err)} = ($dbh, 5, $now, '');
+    # Say WHERE, the first time and after every outage: a node reporting to
+    # the wrong database must be visible in its log from the first minute.
+    if ($self->{last_err} || !$self->{ever_ok}) {
+        my $d = $self->{db} || {};
+        $self->_log(info => sprintf 'shared ban list: %s %s@%s:%s/%s', ($self->{ever_ok} ? 'connected again to' : 'connected to'),
+            map { $_ // '?' } @{$d}{qw(user host port name)});
+    }
+    @{$self}{qw(dbh backoff last_ok last_err ever_ok)} = ($dbh, 5, $now, '', 1);
     return $dbh;
 }
 

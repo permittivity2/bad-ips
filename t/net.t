@@ -26,19 +26,19 @@ for my $bad ('256.1.1.1', '01.2.3.4', '1.2.3', '1.2.3.4/33', '::1/129', 'abc', '
 }
 
 # --- overlap ----------------------------------------------------------------
-ok overlaps(parse_cidr('23.116.0.0/16'), parse_cidr('23.116.91.64/29')), 'a wider block overlaps a narrower one inside it';
-ok overlaps(parse_cidr('23.116.91.65'), parse_cidr('23.116.91.64/29')), 'an address inside a block overlaps it';
-ok !overlaps(parse_cidr('23.116.91.72'), parse_cidr('23.116.91.64/29')), 'the next address after a /29 does not';
+ok overlaps(parse_cidr('192.0.0.0/16'), parse_cidr('192.0.2.64/29')), 'a wider block overlaps a narrower one inside it';
+ok overlaps(parse_cidr('192.0.2.65'), parse_cidr('192.0.2.64/29')), 'an address inside a block overlaps it';
+ok !overlaps(parse_cidr('192.0.2.72'), parse_cidr('192.0.2.64/29')), 'the next address after a /29 does not';
 ok !overlaps(parse_cidr('10.0.0.0/8'), parse_cidr('::/0')), 'different families never overlap';
 
 # --- never-block ------------------------------------------------------------
 my $nb = BadIPs::Engine::NeverBlock->new(
-    '23.116.91.64/29', '198.51.100.45/32', '2001:db8:5400:2e7f::/64',
+    '192.0.2.64/29', '198.51.100.45/32', '2001:db8:5400:2e7f::/64',
 );
 is_deeply [ $nb->errors ], [], 'no errors for a valid list';
 
 for my $h (64 .. 71) {
-    ok $nb->conflict("23.116.91.$h"), "house address 23.116.91.$h is never blocked";
+    ok $nb->conflict("192.0.2.$h"), "house address 192.0.2.$h is never blocked";
 }
 ok $nb->conflict('198.51.100.45'), 'offsite v4 is never blocked';
 ok !$nb->conflict('198.51.100.46'), 'its neighbour is not protected (we never-block the /32, not the /23)';
@@ -46,7 +46,7 @@ ok $nb->conflict('2001:db8:5400:2e7f:1:2:3:4'), 'offsite v6 is never blocked';
 ok $nb->conflict('2001:db8:5400:2e7f::dead'), 'anything in offsite\'s /64 is never blocked';
 ok !$nb->conflict('2001:db8:5400:2e80::1'), 'the next /64 is not';
 
-is $nb->conflict('23.116.0.0/16'), '23.116.91.64/29', 'a range CONTAINING the house is refused';
+is $nb->conflict('192.0.0.0/16'), '192.0.2.64/29', 'a range CONTAINING the house is refused';
 ok $nb->conflict('0.0.0.0/0'), 'everything-v4 is refused';
 ok $nb->conflict('::/0'), 'everything-v6 is refused';
 
@@ -59,11 +59,11 @@ ok !$nb->conflict('203.0.113.7'), 'TEST-NET-3 is blockable (the verification tes
 ok !$nb->conflict('196.251.121.113'), 'an ordinary internet address is blockable';
 ok $nb->conflict('not-an-address'), 'garbage is treated as never-block, so it is never blocked';
 
-my $bad = BadIPs::Engine::NeverBlock->new('23.116.91.64/29', '23.116.91.300');
+my $bad = BadIPs::Engine::NeverBlock->new('192.0.2.64/29', '192.0.2.300');
 is scalar($bad->errors), 1, 'an invalid entry is reported, not silently dropped';
 
 my @v4 = $nb->cidrs(4);
-ok( (grep { $_ eq '23.116.91.64/29' } @v4), 'cidrs(4) lists the house' );
+ok( (grep { $_ eq '192.0.2.64/29' } @v4), 'cidrs(4) lists the house' );
 ok( !(grep { /:/ } @v4), 'cidrs(4) has no v6 entries' );
 
 done_testing;

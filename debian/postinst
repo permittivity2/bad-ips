@@ -401,15 +401,20 @@ fi
 if [ -n "$ROLE" ]; then
     case "$ROLE" in
         block|report)
-            systemctl enable bad_ips.service >/dev/null 2>&1 || true
-            if /usr/local/sbin/bad_ips --test-config >/dev/null 2>&1; then
+            # Enabled only with a configuration the daemon will run. A refused
+            # one (e.g. two files disagreeing about the database) is switched
+            # OFF until it is fixed -- not left enabled to fail at every boot.
+            # The install itself does not fail: the package is fine.
+            if TC_OUT=$(/usr/local/sbin/bad_ips --test-config 2>&1); then
+                systemctl enable bad_ips.service >/dev/null 2>&1 || true
                 systemctl restart bad_ips.service || \
                     echo "WARNING: bad_ips.service failed to start; see: journalctl -u bad_ips.service -n 50"
                 echo "✓ bad_ips.service enabled and (re)started (role = $ROLE)"
             else
-                # Don't fail the package install; the daemon would refuse to start anyway
-                echo "WARNING: the configuration has errors; not starting bad_ips.service:"
-                /usr/local/sbin/bad_ips --test-config 2>&1 | grep -E 'ERROR' || true
+                systemctl disable --now bad_ips.service >/dev/null 2>&1 || true
+                echo "WARNING: the configuration has errors; bad_ips.service is switched OFF until they are fixed:"
+                printf '%s\n' "$TC_OUT" | grep -E '^ERROR' || true
+                echo "Fix them, then: sudo dpkg-reconfigure bad-ips"
             fi
             ;;
         off)

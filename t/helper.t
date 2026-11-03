@@ -26,7 +26,7 @@ iface eth6
 iface eth7
 dns_accept 1
 never 10.0.0.0/8
-never 23.116.91.64/29
+never 192.0.2.64/29
 never 2001:db8:5400:2e7f::/64
 feed 1.10.16.0/20
 feed 2001:678:254::/48
@@ -40,11 +40,11 @@ like $tx, qr/iifname != \{ "eth6", "eth7" \} accept comment "badips:iface"/, 'dr
 like $tx, qr/th dport 53 accept comment "badips:dns"/, 'DNS is accepted ahead of the drops';
 like $tx, qr/203\.0\.113\.7 timeout 600s/, 'ban with its timeout';
 like $tx, qr/2001:db8::7 timeout 2592000s/, 'an over-long timeout is capped at 30 days';
-like $tx, qr/never_block \{.*23\.116\.91\.64\/29/s, 'never-block entries in the set';
+like $tx, qr/never_block \{.*192\.0\.2\.64\/29/s, 'never-block entries in the set';
 my @order = $tx =~ /comment "(badips:\w+)"/g;
 is_deeply \@order, [qw(badips:iface badips:never4 badips:never6 badips:dns badips:ban4 badips:ban6 badips:feed4 badips:feed6)],
     'never-block and DNS accepts come BEFORE any drop';
-like $persist, qr/23\.116\.91\.64\/29/, 'the persistent file carries the never-block list (survives a reload)';
+like $persist, qr/192\.0\.2\.64\/29/, 'the persistent file carries the never-block list (survives a reload)';
 unlike $persist, qr/203\.0\.113\.7|1\.10\.16\.0/, '...but no bans or feed ranges (the daemon restores those)';
 like $persist, qr/table inet badips \{\}\ndelete table inet badips\n/, 'the persistent file is safe to load on its own, too';
 

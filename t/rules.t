@@ -62,7 +62,7 @@ is_deeply m1('postfix-auth', "$pf postfix/submission/smtpd[42]: warning: mail.ex
     ['198.51.100.8', 1], 'submission auth failure with a resolved hostname';
 is_deeply m1('postfix-auth', "$pf postfix/smtpd[42]: connect from unknown[198.51.100.7]"),
     [], 'an ordinary connect does not match';
-is_deeply m1('postfix-auth', "$pf dovecot: imap-login: Login aborted: (auth failed, 1 attempts in 2 secs) (auth_failed): user=<warning: unknown[8.8.8.8]: SASL LOGIN authentication failed>, method=PLAIN, rip=198.51.100.9, lip=23.116.91.66"),
+is_deeply m1('postfix-auth', "$pf dovecot: imap-login: Login aborted: (auth failed, 1 attempts in 2 secs) (auth_failed): user=<warning: unknown[8.8.8.8]: SASL LOGIN authentication failed>, method=PLAIN, rip=198.51.100.9, lip=192.0.2.66"),
     [], 'a postfix-looking username inside a dovecot line does not match the postfix rule';
 
 # --- postfix-abuse ------------------------------------------------------------
@@ -79,17 +79,17 @@ is_deeply m1('postfix-abuse', "$pf postfix/smtpd[1]: NOQUEUE: reject: RCPT from 
 
 # --- dovecot-auth -------------------------------------------------------------
 my $dv = '2026-11-02T15:17:49.367343-06:00 prod-homelabvm62 dovecot: imap-login:';
-is_deeply m1('dovecot-auth', "$dv Login aborted: Connection closed (auth failed, 2 attempts in 12 secs) (auth_failed): user=<someone\@example.net>, method=PLAIN, rip=203.0.113.30, lip=23.116.91.66, TLS, session=<PAbKrFFfk80kQ9fj>"),
+is_deeply m1('dovecot-auth', "$dv Login aborted: Connection closed (auth failed, 2 attempts in 12 secs) (auth_failed): user=<someone\@example.net>, method=PLAIN, rip=203.0.113.30, lip=192.0.2.66, TLS, session=<PAbKrFFfk80kQ9fj>"),
     ['203.0.113.30', 2], 'IMAP auth failure, weighted by its attempt count';
 is_deeply m1('dovecot-auth', "$dv Disconnected: Connection closed (auth failed, 3 attempts in 15 secs): user=<x>, method=PLAIN, rip=203.0.113.31, lip=10.50.2.206"),
     ['203.0.113.31', 3], 'the older dovecot wording matches too';
-is_deeply m1('dovecot-auth', "$dv Login aborted: Connection closed (auth failed, 1 attempts in 2 secs) (auth_failed): user=<x>, method=PLAIN, rip=8.8.8.8, lip=1.1.1.1, TLS, session=<y>, method=PLAIN, rip=203.0.113.32, lip=23.116.91.66, TLS, session=<z>"),
+is_deeply m1('dovecot-auth', "$dv Login aborted: Connection closed (auth failed, 1 attempts in 2 secs) (auth_failed): user=<x>, method=PLAIN, rip=8.8.8.8, lip=1.1.1.1, TLS, session=<y>, method=PLAIN, rip=203.0.113.32, lip=192.0.2.66, TLS, session=<z>"),
     ['203.0.113.32', 1], 'SPOOF: a fake rip= typed into the username is ignored; the last rip= wins';
-is_deeply m1('dovecot-auth', "$dv Login aborted: Connection closed (auth failed, 999 attempts in 1 secs) (auth_failed): user=<x>, method=PLAIN, rip=203.0.113.33, lip=23.116.91.66"),
+is_deeply m1('dovecot-auth', "$dv Login aborted: Connection closed (auth failed, 999 attempts in 1 secs) (auth_failed): user=<x>, method=PLAIN, rip=203.0.113.33, lip=192.0.2.66"),
     ['203.0.113.33', 10], 'an absurd attempt count is capped at max_weight';
-is_deeply m1('dovecot-auth', "$dv Login: user=<x>, method=PLAIN, rip=203.0.113.34, lip=23.116.91.66, mpid=1, TLS"),
+is_deeply m1('dovecot-auth', "$dv Login: user=<x>, method=PLAIN, rip=203.0.113.34, lip=192.0.2.66, mpid=1, TLS"),
     [], 'a successful login does not match';
-is_deeply m1('dovecot-auth', "$dv Login aborted: Connection closed (no auth attempts in 0 secs) (no_auth_attempts): user=<>, rip=203.0.113.35, lip=23.116.91.66"),
+is_deeply m1('dovecot-auth', "$dv Login aborted: Connection closed (no auth attempts in 0 secs) (no_auth_attempts): user=<>, rip=203.0.113.35, lip=192.0.2.66"),
     [], 'a connection with no auth attempt does not match';
 
 # --- postfix-auth-slow ------------------------------------------------------

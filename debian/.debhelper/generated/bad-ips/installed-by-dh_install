@@ -10,9 +10,11 @@
 ./usr/local/etc/badips.d/30-dovecot.conf
 ./usr/local/etc/badips.d/40-nginx.conf
 ./usr/local/etc/badips.d/50-apache.conf
+./usr/local/etc/badips.d/60-rules.conf
 ./usr/local/etc/badips.d/70-bind.conf
 ./usr/local/etc/badips.d/80-publicblocklists.conf
 ./usr/local/share/bad_ips/reconfigure-user.sh
+./usr/local/share/bad_ips/schema.sql
 ./etc/systemd/system/bad_ips.service
 ./etc/logrotate.d/bad_ips
 ./scripts/migrate_database_v2.pl
@@ -28,9 +30,11 @@
 ./usr/local/etc/badips.d/30-dovecot.conf
 ./usr/local/etc/badips.d/40-nginx.conf
 ./usr/local/etc/badips.d/50-apache.conf
+./usr/local/etc/badips.d/60-rules.conf
 ./usr/local/etc/badips.d/70-bind.conf
 ./usr/local/etc/badips.d/80-publicblocklists.conf
 ./usr/local/share/bad_ips/reconfigure-user.sh
+./usr/local/share/bad_ips/schema.sql
 ./etc/systemd/system/bad_ips.service
 ./etc/logrotate.d/bad_ips
 ./scripts/migrate_database_v2.pl

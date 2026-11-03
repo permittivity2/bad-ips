@@ -30,7 +30,7 @@ sub append  { my ($f, @l) = @_; open my $fh, '>>', $f or die; print {$fh} map { 
 sub smtp_fail { my ($ip, $t) = @_; rfc3339($t) . " prod-homelab39 postfix/smtpd[4242]: warning: unknown[$ip]: SASL LOGIN authentication failed: Invalid authentication mechanism: 'LOGIN', sasl_username=(unavailable)" }
 sub probe     { my ($ip, $t, $p) = @_; "$ip - - [" . nginxts($t) . "] \"GET $p HTTP/1.1\" 404 162 \"-\" \"zgrab/0.x\"" }
 
-my $NEVER = "never_block_cidrs = 23.116.91.64/29, 198.51.100.45/32, 2001:db8:5400:2e7f::/64\n";
+my $NEVER = "never_block_cidrs = 192.0.2.64/29, 198.51.100.45/32, 2001:db8:5400:2e7f::/64\n";
 sub host_conf {
     my (%a) = @_;
     my $d = tempdir(CLEANUP => 1);
@@ -62,13 +62,13 @@ ok $mail->start, 'report host starts';
 $mail->step($now);
 
 append($maillog, map { smtp_fail('203.0.113.90', $now - 50 + $_) } 1 .. 5);
-append($maillog, map { smtp_fail('23.116.91.65', $now - 40 + $_) } 1 .. 6);    # the house
+append($maillog, map { smtp_fail('192.0.2.65', $now - 40 + $_) } 1 .. 6);    # the house
 append($maillog, map { smtp_fail('198.51.100.45', $now - 30 + $_) } 1 .. 6);    # offsite
 $mail->step($now + 6);
 my $st = BadIPs::Engine::Store->new(db => $pg->db, host => 'test');
 my $active = $st->load_active($now + 6);
 ok exists $active->{'203.0.113.90'}, 'the mail server reported the attacker to the shared list';
-ok !exists $active->{'23.116.91.65'} && !exists $active->{'198.51.100.45'}, 'the house and offsite were never reported';
+ok !exists $active->{'192.0.2.65'} && !exists $active->{'198.51.100.45'}, 'the house and offsite were never reported';
 is $mail->{stats}{never_skipped}, 12, 'their 12 lines were skipped by the never-block list';
 ok !$mail->{firewall}, 'a report host has no firewall at all';
 
@@ -93,7 +93,7 @@ my $edge = BadIPs::Engine->new(conf_main => "$edir/none", conf_dir => "$edir/d",
 ok $edge->start, 'edge starts';
 $edge->step($now + 10);
 ok $k->has('badipv4', '203.0.113.90'), 'on its first cycle the edge blocks what the mail server reported';
-ok $k->has('never_block', '23.116.91.64/29'), 'never-block in place';
+ok $k->has('never_block', '192.0.2.64/29'), 'never-block in place';
 is_deeply $k->{rules}[0], 'badips:iface', 'drops only on the internet-facing interfaces';
 
 # its own detection is blocked at once, not 30 s later

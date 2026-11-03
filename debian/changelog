@@ -1,3 +1,27 @@
+bad-ips (4.0.1) unstable; urgency=medium
+
+  * Role mode: the settings that decide what happens to traffic and where
+    detections go -- role, dry_run, block_interfaces, the never-block lists,
+    and the database settings as ONE group -- must each come from one file.
+    Two files that disagree, or database settings split across files, are
+    refused, naming both files and both values (never a password), instead
+    of "a later file wins" choosing one by its file NAME. Found on the first
+    fleet rollout of 4.0.0: a purged 3.x install had left
+    badips.d/database.conf (a dead database) on every node, and
+    "database.conf" sorts after "96-fleet-db.conf", so it silently won. No
+    harm was done (the edge was only watching), but nothing was shared.
+  * --test-config and the daemon's start log say which file the role, the
+    never-block list and the database came from, and the shared list's
+    first connection is logged with its target (user@host:port/database).
+  * postinst (role mode): a block/report configuration that --test-config
+    refuses now leaves bad_ips.service switched OFF (4.0.0 left it enabled,
+    to fail at every boot).
+  * purge also removes badips.d/database.conf when it is the one the web
+    installer generated (recognised by its header); a hand-written one is
+    kept.
+
+ -- Gardner <gardner@homelab>  Mon, 02 Nov 2026 21:12:40 -0600
+
 bad-ips (4.0.0) unstable; urgency=medium
 
   * Role mode, for a fleet behind one internet edge. Set
