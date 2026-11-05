@@ -199,6 +199,7 @@ sub load {
     $s{state_dir} = $g->{state_dir} // '/var/lib/bad_ips';
     $s{cache_dir} = $g->{cache_dir} // '/var/cache/badips';
     # where the metrics file goes (node_exporter's textfile directory); empty = publish nothing
+    $s{geo_dir} = $g->{geo_dir} // '/var/lib/bad_ips/geo';    # DB-IP data for country/owner (block role)
     $s{metrics_dir} = $g->{metrics_dir} // '/var/lib/prometheus/node-exporter';
 
     # never-block: v4 and v6 lists are one list here

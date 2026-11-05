@@ -327,6 +327,16 @@ Group=$BADIPS_GROUP
 SupplementaryGroups=systemd-journal adm
 SYSDEOF
 
+# The country / network-owner refresh runs as the same user
+mkdir -p /etc/systemd/system/bad_ips-geo.service.d
+cat > /etc/systemd/system/bad_ips-geo.service.d/user.conf <<SYSDEOF
+[Service]
+User=$BADIPS_USER
+Group=$BADIPS_GROUP
+SYSDEOF
+install -d -o "$BADIPS_USER" -g "$BADIPS_GROUP" -m 0755 /var/lib/bad_ips/geo 2>/dev/null || true
+systemctl daemon-reload >/dev/null 2>&1 || true
+
 echo "✓ Systemd drop-in configuration created"
 
 # ============================================================================
@@ -399,6 +409,15 @@ PLUGINEOF
         echo "  • PublicBlocklistPlugins section added (Spamhaus enabled by default)"
         echo ""
     fi
+fi
+
+# ============================================================================
+# 7.9 Country / network-owner data (4.2): only the block role looks addresses up
+# ============================================================================
+if [ "$ROLE" = "block" ]; then
+    systemctl enable --now bad_ips-geo.timer >/dev/null 2>&1 || true
+else
+    systemctl disable --now bad_ips-geo.timer >/dev/null 2>&1 || true
 fi
 
 # ============================================================================

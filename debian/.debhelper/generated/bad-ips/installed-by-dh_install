@@ -1,6 +1,7 @@
 ./usr/local/sbin/bad_ips
 ./usr/local/sbin/bad_ips_installer.sh
 ./usr/local/sbin/bad_ips_nft
+./usr/local/sbin/bad_ips_geo_update
 ./usr/local/lib/site_perl/BadIPs.pm
 ./usr/local/lib/site_perl/BadIPs
 ./usr/local/etc/badips.conf.template
@@ -16,11 +17,14 @@
 ./usr/local/share/bad_ips/reconfigure-user.sh
 ./usr/local/share/bad_ips/schema.sql
 ./etc/systemd/system/bad_ips.service
+./etc/systemd/system/bad_ips-geo.service
+./etc/systemd/system/bad_ips-geo.timer
 ./etc/logrotate.d/bad_ips
 ./scripts/migrate_database_v2.pl
 ./usr/local/sbin/bad_ips
 ./usr/local/sbin/bad_ips_installer.sh
 ./usr/local/sbin/bad_ips_nft
+./usr/local/sbin/bad_ips_geo_update
 ./usr/local/lib/site_perl/BadIPs.pm
 ./usr/local/lib/site_perl/BadIPs
 ./usr/local/etc/badips.conf.template
@@ -36,5 +40,7 @@
 ./usr/local/share/bad_ips/reconfigure-user.sh
 ./usr/local/share/bad_ips/schema.sql
 ./etc/systemd/system/bad_ips.service
+./etc/systemd/system/bad_ips-geo.service
+./etc/systemd/system/bad_ips-geo.timer
 ./etc/logrotate.d/bad_ips
 ./scripts/migrate_database_v2.pl

@@ -1,0 +1,52 @@
+#!/usr/bin/perl
+# bad_ips_geo_update -- fetch the DB-IP Lite country and ASN files and build
+# the lookup files the daemon uses to tell which country and network owner a
+# banned address belongs to (BadIPs::Engine::Geo).
+#
+# DB-IP Lite is published monthly, free, under CC BY 4.0: https://db-ip.com
+# (anything that shows the result -- a dashboard -- must credit DB-IP).
+#
+# Run by bad_ips-geo.timer on block-role hosts as the service user; safe by
+# hand too:   sudo -u badips /usr/local/sbin/bad_ips_geo_update [--dir DIR]
+# Offline use (tests, a mirror):  --country FILE --asn FILE
+use strict;
+use warnings;
+
+use lib '/usr/local/lib/site_perl';
+use Getopt::Long qw(GetOptions);
+use File::Temp qw(tempdir);
+use POSIX qw(strftime);
+use BadIPs::Engine::Geo;
+
+my ($dir, $country, $asn, $base) = ('/var/lib/bad_ips/geo', undef, undef, 'https://download.db-ip.com/free');
+GetOptions('dir=s' => \$dir, 'country=s' => \$country, 'asn=s' => \$asn, 'base=s' => \$base) or exit 2;
+
+my $work = tempdir(CLEANUP => 1);
+my $min_rows;
+
+if (!defined $country) {
+    require LWP::UserAgent;
+    my $ua = LWP::UserAgent->new(timeout => 120, agent => 'bad-ips/4 (+https://github.com/permittivity2/bad-ips)');
+    # This month's file may not be published yet: fall back to last month's.
+    my @t = localtime;
+    my @months = (strftime('%Y-%m', @t), strftime('%Y-%m', 0, 0, 0, 1, $t[4] - 1, $t[5]));
+    for my $kind (qw(country asn)) {
+        my $got;
+        for my $m (@months) {
+            my $url  = "$base/dbip-$kind-lite-$m.csv.gz";
+            my $file = "$work/$kind.csv.gz";
+            my $r = $ua->get($url, ':content_file' => $file);
+            if ($r->is_success) { $got = $file; print "fetched $url\n"; last }
+            print "no $url: " . $r->status_line . "\n";
+        }
+        die "could not fetch the $kind data\n" unless $got;
+        if ($kind eq 'country') { $country = $got } else { $asn = $got }
+    }
+}
+die "need --country and --asn together\n" unless defined $country && defined $asn;
+
+my $n = BadIPs::Engine::Geo::build(country => $country, asn => $asn, dir => $dir, min_rows => $min_rows);
+open(my $fh, '>', "$dir/UPDATED") or die "cannot write $dir/UPDATED: $!\n";
+print {$fh} strftime('%Y-%m-%d %H:%M:%S', localtime) . "\nIP geolocation by DB-IP (https://db-ip.com), CC BY 4.0\n";
+close $fh;
+print "installed $n->{country} country ranges and $n->{asn} network-owner ranges into $dir\n";

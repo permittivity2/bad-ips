@@ -1,0 +1,11 @@
+[Unit]
+Description=Bad IPs: refresh the country / network-owner data (DB-IP Lite)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# User and Group come from the same drop-in as bad_ips.service
+# (/etc/systemd/system/bad_ips.service.d/user.conf is copied by the postinst
+# to bad_ips-geo.service.d/user.conf).
+ExecStart=/usr/local/sbin/bad_ips_geo_update

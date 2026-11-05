@@ -46,6 +46,13 @@ the directory. The block role's firewall also counts dropped packets by list and
 port group, every SSH packet on the public interfaces, and which banned
 addresses keep knocking. Metric names all start with `badips_`.
 
+**Where a ban comes from (4.2).** On the block role the daemon records each
+banned address's country and network owner in the shared database (table
+`ip_geo`, shown with the bans by the view `offenders`). It needs the DB-IP Lite
+data, which `bad_ips-geo.timer` fetches monthly (`geo_dir`, default
+`/var/lib/bad_ips/geo`); until then bans simply carry no country. DB-IP Lite is
+CC BY 4.0: credit <https://db-ip.com> wherever the results are shown.
+
 ## Main Configuration: badips.conf
 
 ### Quick Start

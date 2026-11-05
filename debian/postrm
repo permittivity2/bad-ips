@@ -55,6 +55,8 @@ case "$1" in
             echo "✓ Sudoers configuration removed"
         fi
 
+        rm -rf /etc/systemd/system/bad_ips-geo.service.d
+
         # Remove systemd drop-in directory
         if [ -d /etc/systemd/system/bad_ips.service.d ]; then
             echo "Removing systemd drop-in configuration"

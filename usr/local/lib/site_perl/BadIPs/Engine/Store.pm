@@ -176,6 +176,53 @@ SQL
     });
 }
 
+=head2 unlocated($now, $limit)
+
+Addresses with an active ban and no row in ip_geo yet (an arrayref, at most
+$limit); undef if the database is unreachable or the table is not there yet.
+
+=cut
+
+sub unlocated {
+    my ($self, $now, $limit) = @_;
+    return $self->_do($now, sub {
+        my ($dbh) = @_;
+        my $rows = $dbh->selectcol_arrayref(<<'SQL', undef, $now, $limit);
+SELECT DISTINCT host(j.ip)
+  FROM jailed_ips j
+ WHERE j.expires_at > ?
+   AND NOT EXISTS (SELECT 1 FROM ip_geo g WHERE g.ip = j.ip)
+ LIMIT ?
+SQL
+        return $rows;
+    });
+}
+
+=head2 save_geo(\@rows, $now)
+
+Each row is [address, country, asn, org] (any of the last three may be undef:
+"looked up, not found" is also an answer, so it is not asked again).
+Returns the count written, or undef.
+
+=cut
+
+sub save_geo {
+    my ($self, $rows, $now) = @_;
+    return 0 unless @$rows;
+    return $self->_do($now, sub {
+        my ($dbh) = @_;
+        $dbh->begin_work;
+        my $sth = $dbh->prepare_cached(<<'SQL');
+INSERT INTO ip_geo (ip, country, asn, org, looked_up_at) VALUES (?, ?, ?, ?, ?)
+ON CONFLICT (ip) DO UPDATE SET country = EXCLUDED.country, asn = EXCLUDED.asn,
+                               org = EXCLUDED.org, looked_up_at = EXCLUDED.looked_up_at
+SQL
+        $sth->execute(@$_, $now) for @$rows;
+        $dbh->commit;
+        return scalar @$rows;
+    });
+}
+
 =head2 load_exemptions($now)
 
 { address-or-network => until } for exemptions still running.

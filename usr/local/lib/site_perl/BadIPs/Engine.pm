@@ -36,6 +36,7 @@ use BadIPs::Engine::Store;
 use BadIPs::Engine::Firewall;
 use BadIPs::Engine::Feed;
 use BadIPs::Engine::Metrics;
+use BadIPs::Engine::Geo;
 
 sub new {
     my ($class, %a) = @_;
@@ -53,7 +54,7 @@ sub new {
         own       => {},                  # ip => { expires, pushed }
         exempt    => {},                  # addr-or-net => until
         sources   => {},                  # path => source object (kept across reloads)
-        stats     => { map { $_ => 0 } qw(lines matches never_skipped exempt_skipped detections pushed dropped) },
+        stats     => { map { $_ => 0 } qw(lines matches never_skipped exempt_skipped detections pushed dropped located) },
         next      => {},
         by_rule   => {},
     }, $class;
@@ -349,6 +350,29 @@ sub reconcile {
     return $r;
 }
 
+# Country and network owner for the addresses on the shared list (block role
+# only; one host does it for everyone). A few at a time, so a big new list is
+# worked through over several passes without holding up the loop.
+sub locate {
+    my ($self, $now) = @_;
+    return unless $self->{store};
+    my $geo = $self->{geo} //= BadIPs::Engine::Geo->new(dir => $self->{s}{geo_dir});
+    unless ($geo->available) {
+        $self->logger->info("geo: no data in $self->{s}{geo_dir} yet (bad_ips-geo.timer fetches it); bans carry no country until then")
+            unless $self->{geo_warned}++;
+        return;
+    }
+    my $todo = $self->{store}->unlocated($now, 200) or return;
+    return unless @$todo;
+    my @rows;
+    for my $ip (@$todo) {
+        my $g = $geo->lookup($ip);
+        push @rows, [ $ip, $g->{country}, $g->{asn}, $g->{org} ];
+    }
+    my $n = $self->{store}->save_geo(\@rows, $now);
+    $self->{stats}{located} += $n if $n;
+}
+
 sub refresh_feeds {
     my ($self, $now) = @_;
     my $changed = 0;
@@ -385,6 +409,7 @@ sub step {
     if ($now >= ($n->{exempt} // 0))    { $self->refresh_exemptions($now); $n->{exempt} = $now + $s->{exemption_refresh} }
     if ($s->{role} eq 'block') {
         if ($now >= ($n->{feeds} // 0)) { $self->refresh_feeds($now);      $n->{feeds}  = $now + 600 }
+        if ($now >= ($n->{geo} // 0))   { $self->locate($now);            $n->{geo}    = $now + 60 }
         if ($now >= ($n->{reconcile} // 0)) { $self->reconcile($now);      $n->{reconcile} = $now + $s->{reconcile_interval} }
     }
     if ($now >= ($n->{metrics} // 0))   {

@@ -1,3 +1,21 @@
+bad-ips (4.2.0) unstable; urgency=medium
+
+  * Where a ban comes from. The block role looks up the country and network
+    owner of every address on the shared list that has none yet (200 per
+    minute) and keeps the answer in a new table, ip_geo, in the shared
+    database. The data is DB-IP Lite (CC BY 4.0, https://db-ip.com -- credit
+    it wherever the results are shown), fetched monthly by the new
+    bad_ips-geo.timer (enabled on block-role hosts only) with
+    bad_ips_geo_update, and searched straight from disk files, so lookups
+    cost almost no memory. No data yet = no lookups, logged once.
+  * schema.sql (re-apply it as the owner; idempotent) adds ip_geo and a view,
+    `offenders`: the active bans with rule, service, reporting host, times,
+    country and owner -- and no log lines, which can hold user names. A
+    read-only dashboard login is granted that view and nothing else.
+  * New settings: geo_dir (/var/lib/bad_ips/geo). New tests: t/geo.t.
+
+ -- Gardner <gardner@homelab>  Thu, 05 Nov 2026 12:10:00 -0600
+
 bad-ips (4.1.0) unstable; urgency=medium
 
   * Numbers for Prometheus (role mode). Every metrics_interval (30 s) the
