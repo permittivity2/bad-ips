@@ -51,14 +51,17 @@ sub call {
             my @el;
             for my $v (sort keys %{ $s->{sets}{$set} }) {
                 my $exp = $s->{sets}{$set}{$v};
-                if (defined $exp)            { push @el, { elem => { val => $v, timeout => 1, expires => $exp - $s->{clock} } } }
+                if (defined $exp)            { push @el, { elem => { val => $v, timeout => 1, expires => $exp - $s->{clock},
+                                                                     counter => { packets => $s->{element_packets}{$set}{$v} // 0, bytes => 0 } } } }
                 elsif ($v =~ m{(.+)/(\d+)}) { push @el, { prefix => { addr => $1, len => $2 + 0 } } }
                 else                         { push @el, $v }
             }
-            push @o, { set => { family => 'inet', table => 'badips', name => $set, type => $type, flags => [$flag], (@el ? (elem => \@el) : ()) } };
+            push @o, { set => { family => 'inet', table => 'badips', name => $set, type => $type, flags => [$flag], (@el ? (elem => \@el) : ()),
+                              ($set =~ /\Abadipv[46]\z/ ? (stmt => [ { counter => undef } ]) : ()) } };
         }
         push @o, { chain => { family => 'inet', table => 'badips', name => 'preroute_block', hook => 'prerouting', prio => -150, policy => 'accept' } };
-        push @o, { rule => { family => 'inet', table => 'badips', chain => 'preroute_block', comment => $_ } } for @{ $s->{rules} };
+        push @o, { rule => { family => 'inet', table => 'badips', chain => 'preroute_block', comment => $_,
+            expr => [ { counter => { packets => $s->{rule_packets}{$_} // 0, bytes => 0 } } ] } } for @{ $s->{rules} };
         return (0, JSON->new->encode({ nftables => \@o }), '');
     }
     if ($args->[0] eq 'remove') { $s->flush; return (0, '', '') }
@@ -77,7 +80,8 @@ sub call {
                 elsif ($c eq 'feed')       { $s->{sets}{ fam($a) == 4 ? 'feedv4' : 'feedv6' }{$a} = undef }
                 elsif ($c eq 'ban')        { $s->{sets}{ fam($a) == 4 ? 'badipv4' : 'badipv6' }{$a} = $s->{clock} + $b }
             }
-            $s->{rules} = [ (@if ? 'badips:iface' : ()), 'badips:never4', 'badips:never6', ($dns ? 'badips:dns' : ()),
+            $s->{rules} = [ (@if ? 'badips:iface' : ()), 'badips:never4', 'badips:never6', ($dns ? 'badips:dns' : ()), 'badips:knock_all:ssh',
+                            (map { my $l = $_; map { "badips:knock:$l:$_" } @BadIPs::Engine::Firewall::KNOCK_GROUPS } @BadIPs::Engine::Firewall::KNOCK_LISTS),
                             qw(badips:ban4 badips:ban6 badips:feed4 badips:feed6) ];
             return (0, '', '');
         }

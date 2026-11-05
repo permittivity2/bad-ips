@@ -131,6 +131,15 @@ if getent group adm > /dev/null 2>&1; then
     usermod -aG adm "$BADIPS_USER" 2>/dev/null || true
 fi
 
+# Add to the homelab group when the host has one (the fleet does): that group
+# owns node_exporter's textfile directory, where the daemon publishes its
+# numbers (metrics_dir). Without it the daemon publishes nothing and nothing
+# complains. The service is restarted at the end of this script in role mode,
+# which is what makes the new membership take effect.
+if getent group homelab > /dev/null 2>&1; then
+    usermod -aG homelab "$BADIPS_USER" 2>/dev/null || true
+fi
+
 # ============================================================================
 # 3. Create and configure directories with proper ownership
 # ============================================================================

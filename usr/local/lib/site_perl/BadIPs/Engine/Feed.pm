@@ -111,6 +111,23 @@ sub due {
     return 0;
 }
 
+=head2 age($now)
+
+Seconds since the oldest cached copy was fetched; -1 when nothing is cached.
+
+=cut
+
+sub age {
+    my ($self, $now) = @_;
+    $now //= time;
+    my $oldest;
+    for my $url (@{ $self->{urls} }) {
+        my @st = stat($self->_cache_base($url) . '.txt') or return -1;
+        $oldest = $st[9] if !defined $oldest || $st[9] < $oldest;
+    }
+    return defined $oldest ? $now - $oldest : -1;
+}
+
 =head2 refresh($now)
 
 Fetches the URLs that are due. Returns 1 if the combined entry list

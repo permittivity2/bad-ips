@@ -35,6 +35,7 @@ use BadIPs::Engine::Source;
 use BadIPs::Engine::Store;
 use BadIPs::Engine::Firewall;
 use BadIPs::Engine::Feed;
+use BadIPs::Engine::Metrics;
 
 sub new {
     my ($class, %a) = @_;
@@ -54,6 +55,7 @@ sub new {
         sources   => {},                  # path => source object (kept across reloads)
         stats     => { map { $_ => 0 } qw(lines matches never_skipped exempt_skipped detections pushed dropped) },
         next      => {},
+        by_rule   => {},
     }, $class;
     return $self;
 }
@@ -211,6 +213,7 @@ sub handle_line {
 sub _detected {
     my ($self, $d, $now) = @_;
     $self->{stats}{detections}++;
+    $self->{by_rule}{ $d->{rule} }++;
     $self->logger->info(sprintf 'detected %s: %s (%d hits) -> ban until %s',
         $d->{ip}, $d->{rule}, $d->{hits}, strftime('%Y-%m-%d %H:%M:%S', localtime $d->{expires}));
     if ($self->{store}) {
@@ -288,8 +291,10 @@ sub desired_bans {
     for my $ip (keys %b) {
         if (my $c = $self->{s}{never}->conflict($ip)) {
             delete $b{$ip};
-            $self->logger->warn("refusing to block never-block address $ip (matches $c)")
-                unless $self->{warned_never}{$ip}++;
+            unless ($self->{warned_never}{$ip}++) {
+                $self->{never_refused}++;
+                $self->logger->warn("refusing to block never-block address $ip (matches $c)");
+            }
         }
     }
     return \%b;
@@ -301,8 +306,10 @@ sub desired_feed {
     for my $f (@{ $self->{feeds} || [] }) {
         for my $c (@{ $f->entries }) {
             if (my $n = $self->{s}{never}->conflict($c)) {
-                $self->logger->warn(sprintf 'feed %s: refusing %s (overlaps never-block %s)', $f->name, $c, $n)
-                    unless $self->{warned_never}{$c}++;
+                unless ($self->{warned_never}{$c}++) {
+                    $self->{never_refused}++;
+                    $self->logger->warn(sprintf 'feed %s: refusing %s (overlaps never-block %s)', $f->name, $c, $n);
+                }
                 next;
             }
             push @out, $c;
@@ -321,6 +328,7 @@ sub reconcile {
         $self->logger->info("watch mode: would block $self->{last_counts}{bans} addresses and $self->{last_counts}{feed} feed ranges")
             if ($self->{watch_sig} // '') ne $sig;
         $self->{watch_sig} = $sig;
+        $self->{last_sync} = $now;
         return { ok => 1, watch => 1 };
     }
     my $r = $self->{firewall}->reconcile(bans => $bans, feed => $feed, now => $now);
@@ -334,6 +342,8 @@ sub reconcile {
             if !$r->{replaced} && ($r->{added} || $r->{removed} || $r->{extended});
         $self->logger->info('firewall: recovered') if $self->{last_fw_err};
         $self->{last_fw_err} = undef;
+        $self->{last_sync} = $now;
+        $self->{fw_rebuilds}++ if $r->{replaced};
     }
     $self->{last_fw} = $r;
     return $r;
@@ -376,6 +386,10 @@ sub step {
     if ($s->{role} eq 'block') {
         if ($now >= ($n->{feeds} // 0)) { $self->refresh_feeds($now);      $n->{feeds}  = $now + 600 }
         if ($now >= ($n->{reconcile} // 0)) { $self->reconcile($now);      $n->{reconcile} = $now + $s->{reconcile_interval} }
+    }
+    if ($now >= ($n->{metrics} // 0))   {
+        eval { BadIPs::Engine::Metrics::publish($self, $now); 1 } or $self->logger->warn("metrics: $@");
+        $n->{metrics} = $now + $s->{metrics_interval};
     }
     if ($now >= ($n->{save} // 0))      { $self->save_positions;           $n->{save}   = $now + 10 }
     if ($now >= ($n->{expire} // 0))    { $_->expire($now) for values %{ $self->{counters} }; $n->{expire} = $now + 60 }

@@ -1,3 +1,24 @@
+bad-ips (4.1.0) unstable; urgency=medium
+
+  * Numbers for Prometheus (role mode). Every metrics_interval (30 s) the
+    daemon writes badips.prom to metrics_dir (default
+    /var/lib/prometheus/node-exporter, node_exporter's textfile directory; set
+    it empty to publish nothing). Detections by rule, reports sent/queued,
+    never-block refusals, hand unbans, database up, and on the block role the
+    ban and feed-range counts, seconds since the last firewall sync, firewall
+    rebuilds and feed age. Best effort: an unwritable directory is logged once.
+  * Firewall counters (block role): the table now counts, per list and port
+    group (web 80/443, smtp 25, submission 465/587, imap 110/143/993/995,
+    ssh 22), the packets it drops; every SSH packet on the public interfaces
+    (banned or not); and, per element, whether a banned address kept knocking.
+    The ban sets gain `counter`, so an existing 4.0.x table is rebuilt once
+    (atomically, bans included) on the first reconcile after the upgrade.
+  * postinst adds the service user to group `homelab` when the host has one,
+    so it can write the textfile directory.
+  * New tests: t/metrics.t; the fake kernel and helper tests know the counters.
+
+ -- Gardner <gardner@homelab>  Thu, 05 Nov 2026 11:30:00 -0600
+
 bad-ips (4.0.1) unstable; urgency=medium
 
   * Role mode: the settings that decide what happens to traffic and where

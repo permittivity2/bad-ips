@@ -36,11 +36,12 @@ sub runner {
             my @el;
             for my $v (sort keys %{ $K{sets}{$s} }) {
                 my $exp = $K{sets}{$s}{$v};
-                if (defined $exp) { push @el, { elem => { val => $v, timeout => 1, expires => $exp - $CLOCK } } }
+                if (defined $exp) { push @el, { elem => { val => $v, timeout => 1, expires => $exp - $CLOCK, counter => { packets => 0, bytes => 0 } } } }
                 elsif ($v =~ m{(.+)/(\d+)}) { push @el, { prefix => { addr => $1, len => $2 + 0 } } }
                 else { push @el, $v }
             }
-            push @o, { set => { family => 'inet', table => 'badips', name => $s, type => $type, flags => [$flag], (@el ? (elem => \@el) : ()) } };
+            push @o, { set => { family => 'inet', table => 'badips', name => $s, type => $type, flags => [$flag], (@el ? (elem => \@el) : ()),
+                              ($s =~ /\Abadipv[46]\z/ ? (stmt => [ { counter => undef } ]) : ()) } };
         }
         push @o, { chain => { family => 'inet', table => 'badips', name => 'preroute_block', hook => 'prerouting', prio => -150, policy => 'accept' } };
         push @o, { rule => { family => 'inet', table => 'badips', chain => 'preroute_block', comment => $_ } } for @{ $K{rules} };
@@ -61,8 +62,9 @@ sub runner {
                 elsif ($c eq 'feed')  { $K{sets}{ fam($a) == 4 ? 'feedv4' : 'feedv6' }{$a} = undef }
                 elsif ($c eq 'ban')   { $K{sets}{ fam($a) == 4 ? 'badipv4' : 'badipv6' }{$a} = $CLOCK + $b }
             }
-            $K{rules} = [ (@if ? 'badips:iface' : ()), 'badips:never4', 'badips:never6', ($dns ? 'badips:dns' : ()),
-                          qw(badips:ban4 badips:ban6 badips:feed4 badips:feed6) ];
+            $K{rules} = [ (@if ? 'badips:iface' : ()), 'badips:never4', 'badips:never6', ($dns ? 'badips:dns' : ()), 'badips:knock_all:ssh',
+                            (map { my $l = $_; map { "badips:knock:$l:$_" } @BadIPs::Engine::Firewall::KNOCK_GROUPS } @BadIPs::Engine::Firewall::KNOCK_LISTS),
+                            qw(badips:ban4 badips:ban6 badips:feed4 badips:feed6) ];
             return (0, '', '');
         }
         for (@l) {
@@ -100,7 +102,7 @@ ok exists $K{sets}{never_block}{'192.0.2.64/29'}, 'house in never-block';
 ok exists $K{sets}{never_block}{'198.51.100.45'}, 'offsite in never-block';
 ok !exists $K{sets}{never_block}{'10.50.0.0/16'}, 'an entry inside the floor\'s 10/8 is folded away (no overlapping elements)';
 is_deeply [ sort keys %{ $K{sets}{feedv4} } ], ['1.10.16.0/20'], 'a feed range inside another is folded away';
-is_deeply $K{rules}, [qw(badips:iface badips:never4 badips:never6 badips:dns badips:ban4 badips:ban6 badips:feed4 badips:feed6)], 'rules';
+is_deeply $K{rules}, $fw->expected_rules, 'rules';
 
 # --- nothing to do ------------------------------------------------------------------
 @calls = ();

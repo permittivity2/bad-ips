@@ -38,11 +38,16 @@ my ($persist, $tx) = $o =~ /\A### persistent\n(.*)### transaction\n(.*)\z/s;
 like $tx, qr/\Atable inet badips \{\}\ndelete table inet badips\ntable inet badips \{/, 'replace swaps the table in one transaction';
 like $tx, qr/iifname != \{ "eth6", "eth7" \} accept comment "badips:iface"/, 'drops only on the named interfaces';
 like $tx, qr/th dport 53 accept comment "badips:dns"/, 'DNS is accepted ahead of the drops';
+like $tx, qr/set badipv4 \{\s+type ipv4_addr\s+flags timeout\s+counter\b/, 'ban sets count each address (still-knocking metric)';
+like $tx, qr/ip saddr \@badipv4 tcp dport \{ 80, 443 \} counter comment "badips:knock:ban4:web"/, 'a counting rule per port group';
+like $tx, qr/ip6 saddr \@feedv6 tcp dport \{ 22 \} counter comment "badips:knock:feed6:ssh"/, 'IPv6 lists get them too';
 like $tx, qr/203\.0\.113\.7 timeout 600s/, 'ban with its timeout';
 like $tx, qr/2001:db8::7 timeout 2592000s/, 'an over-long timeout is capped at 30 days';
 like $tx, qr/never_block \{.*192\.0\.2\.64\/29/s, 'never-block entries in the set';
-my @order = $tx =~ /comment "(badips:\w+)"/g;
-is_deeply \@order, [qw(badips:iface badips:never4 badips:never6 badips:dns badips:ban4 badips:ban6 badips:feed4 badips:feed6)],
+my @order = $tx =~ /comment "(badips:[\w:]+)"/g;
+is_deeply \@order, [qw(badips:iface badips:never4 badips:never6 badips:dns badips:knock_all:ssh),
+    (map { my $l = $_; map { "badips:knock:$l:$_" } qw(web smtp submission imap ssh) } qw(ban4 ban6 feed4 feed6)),
+    qw(badips:ban4 badips:ban6 badips:feed4 badips:feed6)],
     'never-block and DNS accepts come BEFORE any drop';
 like $persist, qr/192\.0\.2\.64\/29/, 'the persistent file carries the never-block list (survives a reload)';
 unlike $persist, qr/203\.0\.113\.7|1\.10\.16\.0/, '...but no bans or feed ranges (the daemon restores those)';

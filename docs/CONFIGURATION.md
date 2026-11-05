@@ -37,6 +37,15 @@ from an older install: it sorts after a `96-...` file, so under "a later file
 wins" it would silently replace the database you meant. `bad_ips --test-config`
 shows which file each of these came from.
 
+**Metrics (4.1).** The daemon publishes its numbers for Prometheus: every
+`metrics_interval` seconds (default 30) it writes `badips.prom` into
+`metrics_dir` (default `/var/lib/prometheus/node-exporter`, node_exporter's
+textfile directory; set it empty to publish nothing). The package adds the
+service user to group `homelab` when the host has one, because that group owns
+the directory. The block role's firewall also counts dropped packets by list and
+port group, every SSH packet on the public interfaces, and which banned
+addresses keep knocking. Metric names all start with `badips_`.
+
 ## Main Configuration: badips.conf
 
 ### Quick Start

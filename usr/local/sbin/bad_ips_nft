@@ -204,12 +204,22 @@ sub elements {    # "elements = { a, b }" in chunks small enough for nft's parse
     return "        elements = { " . join(",\n                     ", @$list) . " }\n";
 }
 
+# Counters for the metrics feed (item 43). Counter-only rules (no verdict) sit
+# in front of the drop rules, one per banned/feed list and port group; "other"
+# ports are the drop rule's own total minus these. The same names are listed in
+# BadIPs::Engine::Firewall::expected_rules -- keep the two in step (t/helper.t
+# checks the order).
+my @KNOCK_LISTS  = ([ ban4 => 'ip saddr @badipv4' ], [ ban6 => 'ip6 saddr @badipv6' ],
+                    [ feed4 => 'ip saddr @feedv4' ], [ feed6 => 'ip6 saddr @feedv6' ]);
+my @KNOCK_GROUPS = ([ web => '80, 443' ], [ smtp => '25' ], [ submission => '465, 587' ],
+                    [ imap => '110, 143, 993, 995' ], [ ssh => '22' ]);
+
 sub table_text {
     my ($r, $with_dynamic) = @_;
     my %e = $with_dynamic ? (ban => $r->{ban}, feed => $r->{feed}) : (ban => { 4 => [], 6 => [] }, feed => { 4 => [], 6 => [] });
     my $t = "table inet badips {\n";
-    $t .= "    set badipv4 {\n        type ipv4_addr\n        flags timeout\n" . elements($e{ban}{4}) . "    }\n";
-    $t .= "    set badipv6 {\n        type ipv6_addr\n        flags timeout\n" . elements($e{ban}{6}) . "    }\n";
+    $t .= "    set badipv4 {\n        type ipv4_addr\n        flags timeout\n        counter\n" . elements($e{ban}{4}) . "    }\n";
+    $t .= "    set badipv6 {\n        type ipv6_addr\n        flags timeout\n        counter\n" . elements($e{ban}{6}) . "    }\n";
     $t .= "    set feedv4 {\n        type ipv4_addr\n        flags interval\n" . elements($e{feed}{4}) . "    }\n";
     $t .= "    set feedv6 {\n        type ipv6_addr\n        flags interval\n" . elements($e{feed}{6}) . "    }\n";
     $t .= "    set never_block {\n        type ipv4_addr\n        flags interval\n" . elements($r->{never}{4}) . "    }\n";
@@ -221,6 +231,10 @@ sub table_text {
     $t .= qq{        ip saddr \@never_block accept comment "badips:never4"\n};
     $t .= qq{        ip6 saddr \@never_block_v6 accept comment "badips:never6"\n};
     $t .= qq{        meta l4proto { tcp, udp } th dport 53 accept comment "badips:dns"\n} if $r->{dns_accept} // 1;
+    $t .= qq{        tcp dport 22 counter comment "badips:knock_all:ssh"\n};
+    for my $l (@KNOCK_LISTS) {
+        $t .= qq{        $l->[1] tcp dport { $_->[1] } counter comment "badips:knock:$l->[0]:$_->[0]"\n} for @KNOCK_GROUPS;
+    }
     $t .= qq{        ip saddr \@badipv4 counter drop comment "badips:ban4"\n};
     $t .= qq{        ip6 saddr \@badipv6 counter drop comment "badips:ban6"\n};
     $t .= qq{        ip saddr \@feedv4 counter drop comment "badips:feed4"\n};

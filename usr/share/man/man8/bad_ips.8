@@ -1,4 +1,4 @@
-.TH BAD_IPS 8 "November 2026" "Bad IPs 4.0.1" "System Administration"
+.TH BAD_IPS 8 "November 2026" "Bad IPs 4.1.0" "System Administration"
 .SH NAME
 bad_ips \- distributed IP blocking system with centralized database
 .SH SYNOPSIS
@@ -185,6 +185,9 @@ defaults to prefer.
 .TP
 .BR reconcile_interval " (30), " push_interval " (5), " exemption_refresh " (60), " sleep_time " (2), " heartbeat " (300)"
 Seconds between firewall reconciles (block role), detection pushes, exemption refreshes, loop passes and heartbeat log lines.
+.TP
+.BR metrics_dir " (/var/lib/prometheus/node-exporter), " metrics_interval " (30)"
+Where the daemon writes badips.prom, a file of numbers for Prometheus' node_exporter (detections by rule, bans, firewall drops by list and port group, SSH attempts, banned addresses still knocking, seconds since the last firewall sync, database state). Empty metrics_dir publishes nothing. A directory that cannot be written is logged once and never stops the daemon.
 .TP
 .BR backread_bytes " (2 MB), " max_read_bytes " (8 MB), " queue_max " (5000)"
 How far back a log file is read on a fresh start (a saved position is used when the file is the same one), the most read per pass, and the most detections held while the database is unreachable (the oldest are dropped beyond it).

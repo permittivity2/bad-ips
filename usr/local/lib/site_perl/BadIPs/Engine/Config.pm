@@ -188,7 +188,7 @@ sub load {
         if ($v =~ /\A[01]\z/) { $s{$n} = $v + 0 } else { push @err, "$n must be 0 or 1" }
     }
     for my $k ([sleep_time => 2, 1, 60], [push_interval => 5, 1, 300], [reconcile_interval => 30, 5, 600],
-               [exemption_refresh => 60, 10, 3600], [heartbeat => 300, 30, 86400],
+               [exemption_refresh => 60, 10, 3600], [heartbeat => 300, 30, 86400], [metrics_interval => 30, 5, 3600],
                [exemption_hours => 24, 1, 24 * 90], [backread_bytes => 2 * 1024 * 1024, 0, 512 * 1024 * 1024],
                [max_read_bytes => 8 * 1024 * 1024, 65536, 1024 * 1024 * 1024], [queue_max => 5000, 100, 1_000_000]) {
         my ($n, $def, $min, $max) = @$k;
@@ -198,6 +198,8 @@ sub load {
     }
     $s{state_dir} = $g->{state_dir} // '/var/lib/bad_ips';
     $s{cache_dir} = $g->{cache_dir} // '/var/cache/badips';
+    # where the metrics file goes (node_exporter's textfile directory); empty = publish nothing
+    $s{metrics_dir} = $g->{metrics_dir} // '/var/lib/prometheus/node-exporter';
 
     # never-block: v4 and v6 lists are one list here
     my @nb = map { split /\s*,\s*/ } grep { defined } $g->{never_block_cidrs}, $g->{never_block_cidrs_v6};

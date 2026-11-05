@@ -87,8 +87,10 @@ sub _elem_value {
 =head2 state
 
 { exists => 0 } when the table is absent; otherwise
-{ exists => 1, sets => { name => { type, flags => [..], elems => { value => expires|undef } } },
-  chain => { hook, prio, policy } | undef, rules => [ comment, ... ] }.
+{ exists => 1, sets => { name => { type, flags => [..], elems => { value => expires|undef },
+  counter => 0|1, knocking => N } }, chain => { hook, prio, policy } | undef, rules => [ comment, ... ],
+  packets => { comment => N } }. "knocking" is how many elements of a ban set have
+counted a packet since they were added; "packets" is each counting rule's total.
 { error => ... } when the helper itself failed.
 
 =cut
@@ -106,12 +108,15 @@ sub state {
         if (my $t = $o->{table}) { $st{exists} = 1 if $t->{family} eq 'inet' && $t->{name} eq 'badips' }
         elsif (my $s = $o->{set}) {
             next unless $s->{table} eq 'badips';
-            my %el;
+            my (%el, $knocking);
             for my $e (@{ $s->{elem} || [] }) {
                 my ($v, $exp) = _elem_value($e);
                 $el{$v} = $exp if defined $v;
+                $knocking++ if defined $v && ref $e eq 'HASH' && ref $e->{elem} eq 'HASH' && ref $e->{elem}{counter} && $e->{elem}{counter}{packets};
             }
-            $st{sets}{ $s->{name} } = { type => $s->{type}, flags => [ sort @{ $s->{flags} || [] } ], elems => \%el };
+            $st{sets}{ $s->{name} } = { type => $s->{type}, flags => [ sort @{ $s->{flags} || [] } ], elems => \%el,
+                                        counter => (grep { exists $_->{counter} } @{ $s->{stmt} || [] }) ? 1 : 0,
+                                        knocking => $knocking // 0 };
         }
         elsif (my $c = $o->{chain}) {
             next unless $c->{table} eq 'badips' && $c->{name} eq 'preroute_block';
@@ -120,15 +125,24 @@ sub state {
         elsif (my $r = $o->{rule}) {
             next unless $r->{table} eq 'badips' && $r->{chain} eq 'preroute_block';
             push @{ $st{rules} }, $r->{comment} // '';
+            for my $x (@{ $r->{expr} || [] }) {
+                $st{packets}{ $r->{comment} // '' } = $x->{counter}{packets} if ref $x->{counter};
+            }
         }
     }
     return \%st;
 }
 
+# Counting-only rules (metrics, item 43), in the order bad_ips_nft writes them.
+our @KNOCK_LISTS  = qw(ban4 ban6 feed4 feed6);
+our @KNOCK_GROUPS = qw(web smtp submission imap ssh);
+
 sub expected_rules {
     my ($self) = @_;
     return [ (@{ $self->{ifaces} } ? 'badips:iface' : ()), 'badips:never4', 'badips:never6',
-             ($self->{dns_accept} ? 'badips:dns' : ()), qw(badips:ban4 badips:ban6 badips:feed4 badips:feed6) ];
+             ($self->{dns_accept} ? 'badips:dns' : ()), 'badips:knock_all:ssh',
+             (map { my $l = $_; map { "badips:knock:$l:$_" } @KNOCK_GROUPS } @KNOCK_LISTS),
+             qw(badips:ban4 badips:ban6 badips:feed4 badips:feed6) ];
 }
 
 my %SETDEF = (
@@ -147,6 +161,7 @@ sub _structure_problem {
         my ($type, $flag) = @{ $SETDEF{$name} };
         return "set $name has type $s->{type}" if $s->{type} ne $type;
         return "set $name has flags @{ $s->{flags} }" if "@{ $s->{flags} }" ne $flag;
+        return "set $name does not count elements" if $name =~ /\Abadipv[46]\z/ && !$s->{counter};
     }
     for my $name (keys %{ $st->{sets} }) { return "unexpected set $name" unless $SETDEF{$name} }
     my $c = $st->{chain} or return 'chain missing';
