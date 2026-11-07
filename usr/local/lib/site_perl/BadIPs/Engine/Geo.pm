@@ -23,7 +23,7 @@ use warnings;
 use Socket qw(inet_pton AF_INET AF_INET6);
 use IO::Uncompress::Gunzip qw($GunzipError);
 
-our $VERSION = '4.3.0';
+our $VERSION = '4.3.1';
 
 my %REC = (country4 => [4, 2], country6 => [16, 2], asn4 => [4, 4], asn6 => [16, 4]);
 

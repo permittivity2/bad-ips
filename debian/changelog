@@ -1,3 +1,26 @@
+bad-ips (4.3.1) unstable; urgency=medium
+
+  * The sshd rules count two more lines, so a keys-only server still bans.
+    With PasswordAuthentication no, sshd writes NO "Failed password" line,
+    not even for a bot that sends a password anyway: a refused method never
+    reaches the privileged monitor, which is what writes that line (seen on
+    jumper the hour it went keys-only, verified with a client that ignores
+    the offered methods). What a connection leaves behind is "Invalid user",
+    "User NAME from ADDRESS not allowed because not listed in AllowUsers"
+    (new; also DenyUsers, AllowGroups, DenyGroups -- the name is the
+    account's own, written after the lookup succeeded, never client text)
+    and the give-up line, which comes in two flavours: "Connection closed
+    by ... user" (counted since 4.3.0) and "Disconnected from ... user ...
+    [preauth]" (new; three bots in four send the disconnect). Under 4.3.0 a
+    polite bot hammering root on a keys-only host scored nothing. Pre-auth
+    closes without a username, failed public keys and PAM lines stay
+    uncounted, as does "Disconnected from user NAME" without [preauth],
+    which is the end of a session that had logged in.
+  * Tests for the new lines, their spoof variants and the keys-only
+    scenario; man page.
+
+ -- Gardner <gardner@homelab>  Sat, 07 Nov 2026 15:30:00 -0600
+
 bad-ips (4.3.0) unstable; urgency=medium
 
   * Failed SSH logins are a shipped rule. 60-rules.conf gains sshd-auth

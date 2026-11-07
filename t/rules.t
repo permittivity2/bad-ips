@@ -123,10 +123,31 @@ is_deeply m1('sshd-auth', 'Connection closed by invalid user x from 192.0.2.9 po
     ['203.0.113.14', 1], 'SPOOF: the same for a pre-auth close';
 is_deeply m1('sshd-auth', 'Invalid user  from 203.0.113.15 port 11'),
     ['203.0.113.15', 1], 'an empty username';
+# 4.3.1: what a keys-only server (PasswordAuthentication no) is left with. It
+# writes no "Failed password" line at all, even for a bot that sends one.
+is_deeply m1('sshd-auth', 'Disconnected from invalid user admin 203.0.113.16 port 12 [preauth]'),
+    ['203.0.113.16', 1], 'an unknown user that sent a disconnect while authenticating';
+is_deeply m1('sshd-auth', 'Disconnected from authenticating user someone 203.0.113.17 port 13 [preauth]'),
+    ['203.0.113.17', 1], 'a real user that sent a disconnect while authenticating';
+is_deeply m1('sshd-auth', 'User root from 203.0.113.18 not allowed because not listed in AllowUsers'),
+    ['203.0.113.18', 1], 'a real user the server refuses: AllowUsers';
+is_deeply m1('sshd-auth', 'User someone from 203.0.113.18 not allowed because listed in DenyUsers'),
+    ['203.0.113.18', 1], 'a real user the server refuses: DenyUsers';
+is_deeply m1('sshd-auth', "User someone from 203.0.113.18 not allowed because none of user's groups are listed in AllowGroups"),
+    ['203.0.113.18', 1], 'a real user the server refuses: AllowGroups';
+is_deeply m1('sshd-auth', 'User someone from 203.0.113.18 not allowed because a group is listed in DenyGroups'),
+    ['203.0.113.18', 1], 'a real user the server refuses: DenyGroups';
+is_deeply m1('sshd-auth', 'User root from 2001:db8::6 not allowed because not listed in AllowUsers'),
+    ['2001:db8::6', 1], 'a refused user over IPv6';
+is_deeply m1('sshd-auth', 'Disconnected from invalid user x from 192.0.2.9 port 1 203.0.113.19 port 14 [preauth]'),
+    ['203.0.113.19', 1], 'SPOOF: the same for a disconnect while authenticating';
 for my $line ('Connection closed by 203.0.113.20 port 1 [preauth]',
               'Connection reset by 203.0.113.20 port 1 [preauth]',
               'Received disconnect from 203.0.113.20 port 1:11: Bye Bye [preauth]',
-              'Disconnected from invalid user admin 203.0.113.20 port 1 [preauth]',
+              'Disconnected from user someone 203.0.113.20 port 1',
+              'Disconnected from 203.0.113.20 port 1 [preauth]',
+              'User someone not allowed because account is locked',
+              'User someone not allowed because shell /usr/sbin/nologin does not exist',
               'Accepted publickey for someone from 203.0.113.21 port 1 ssh2: ED25519 SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
               'pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.22  user=root',
               'Failed publickey for someone from 203.0.113.23 port 1 ssh2: ED25519 SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
@@ -149,6 +170,24 @@ for my $line ('Connection closed by 203.0.113.20 port 1 [preauth]',
     my $fdet;
     for my $i (0 .. 11) { $fdet ||= $fast2->observe('203.0.113.41', 90_000 + 3600 * $i, 1, "slow $i") }
     ok !$fdet, 'the same pace never trips the fast rule';
+}
+{
+    # A keys-only host with AllowUsers: a polite bot hammering root writes
+    # only these three lines per connection, none of which 4.3.0 counted.
+    my $c = BadIPs::Engine::Counter->new(rule => $R{'sshd-auth'});
+    my ($det, $t, $seen) = (undef, 90_000, 0);
+    for my $try (1 .. 2) {
+        for my $line ('User root from 203.0.113.42 not allowed because not listed in AllowUsers',
+                      'Received disconnect from 203.0.113.42 port 1:11: Bye Bye [preauth]',
+                      'Disconnected from invalid user root 203.0.113.42 port 1 [preauth]') {
+            my ($ip, $w) = BadIPs::Engine::Rules::match_line($R{'sshd-auth'}, $line);
+            next unless $ip;
+            $seen++;
+            $det ||= $c->observe($ip, $t += 5, $w, $line);
+        }
+    }
+    is $seen, 4, 'keys-only host: two of the three lines a polite root bot leaves per connection count';
+    ok $det, 'keys-only host: a polite root bot is caught in two connections';
 }
 
 # --- postfix-auth-slow ------------------------------------------------------
