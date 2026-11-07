@@ -23,8 +23,8 @@ for my $section (sort keys %$conf) {
     is_deeply $err, [], "shipped rule $1 compiles";
     $R{$1} = $rule;
 }
-is_deeply [ sort keys %R ], [qw(dovecot-auth nginx-catchall-flood nginx-probe postfix-abuse postfix-auth postfix-auth-slow)],
-    'all six shipped rules present';
+is_deeply [ sort keys %R ], [qw(dovecot-auth nginx-catchall-flood nginx-probe postfix-abuse postfix-auth postfix-auth-slow sshd-auth sshd-auth-slow)],
+    'all eight shipped rules present';
 
 sub m1 { my ($rule, $line) = @_; my @r = BadIPs::Engine::Rules::match_line($R{$rule}, $line); return \@r }
 
@@ -92,6 +92,65 @@ is_deeply m1('dovecot-auth', "$dv Login: user=<x>, method=PLAIN, rip=203.0.113.3
 is_deeply m1('dovecot-auth', "$dv Login aborted: Connection closed (no auth attempts in 0 secs) (no_auth_attempts): user=<>, rip=203.0.113.35, lip=192.0.2.66"),
     [], 'a connection with no auth attempt does not match';
 
+# --- sshd-auth ----------------------------------------------------------------
+# Journal rules get the bare MESSAGE (no timestamp, host or identifier): these
+# are OpenSSH 10 (Debian 13, sshd-session) messages, addresses swapped.
+is $R{'sshd-auth'}{journal}, 'ssh.service', 'sshd-auth reads the ssh.service journal';
+is_deeply $R{'sshd-auth'}{files}, [], 'sshd-auth has no file source';
+is $R{'sshd-auth'}{format}, 'journal', 'sshd-auth takes its time from the journal entry';
+is $R{'sshd-auth-slow'}{journal}, 'ssh.service', 'sshd-auth-slow reads the same unit';
+is_deeply m1('sshd-auth', 'Failed password for invalid user admin from 203.0.113.5 port 51234 ssh2'),
+    ['203.0.113.5', 1], 'wrong password for an unknown user';
+is_deeply m1('sshd-auth', 'Failed password for someone from 203.0.113.6 port 1 ssh2'),
+    ['203.0.113.6', 1], 'wrong password for a real user';
+is_deeply m1('sshd-auth', 'Failed keyboard-interactive/pam for invalid user root from 203.0.113.7 port 2 ssh2'),
+    ['203.0.113.7', 1], 'keyboard-interactive failure';
+is_deeply m1('sshd-auth', 'Invalid user ubuntu from 203.0.113.8 port 3'),
+    ['203.0.113.8', 1], 'unknown user';
+is_deeply m1('sshd-auth', 'Connection closed by authenticating user someone 203.0.113.9 port 4 [preauth]'),
+    ['203.0.113.9', 1], 'a client that gave up while authenticating';
+is_deeply m1('sshd-auth', 'Connection closed by invalid user admin 203.0.113.10 port 5 [preauth]'),
+    ['203.0.113.10', 1], 'an unknown user that gave up while authenticating';
+is_deeply m1('sshd-auth', 'banner exchange: Connection from 203.0.113.11 port 6: invalid format'),
+    ['203.0.113.11', 1], 'a non-SSH banner';
+is_deeply m1('sshd-auth', 'Failed password for invalid user test from 2001:db8::5 port 7 ssh2'),
+    ['2001:db8::5', 1], 'IPv6 client';
+is_deeply m1('sshd-auth', 'Failed password for invalid user x from 192.0.2.9 port 1 ssh2 from 203.0.113.12 port 8 ssh2'),
+    ['203.0.113.12', 1], 'SPOOF: an address typed into the username is ignored; the last one wins';
+is_deeply m1('sshd-auth', 'Invalid user x from 192.0.2.9 port 1 from 203.0.113.13 port 9'),
+    ['203.0.113.13', 1], 'SPOOF: the same for an unknown user';
+is_deeply m1('sshd-auth', 'Connection closed by invalid user x from 192.0.2.9 port 1 203.0.113.14 port 10 [preauth]'),
+    ['203.0.113.14', 1], 'SPOOF: the same for a pre-auth close';
+is_deeply m1('sshd-auth', 'Invalid user  from 203.0.113.15 port 11'),
+    ['203.0.113.15', 1], 'an empty username';
+for my $line ('Connection closed by 203.0.113.20 port 1 [preauth]',
+              'Connection reset by 203.0.113.20 port 1 [preauth]',
+              'Received disconnect from 203.0.113.20 port 1:11: Bye Bye [preauth]',
+              'Disconnected from invalid user admin 203.0.113.20 port 1 [preauth]',
+              'Accepted publickey for someone from 203.0.113.21 port 1 ssh2: ED25519 SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+              'pam_unix(sshd:auth): authentication failure; logname= uid=0 euid=0 tty=ssh ruser= rhost=203.0.113.22  user=root',
+              'Failed publickey for someone from 203.0.113.23 port 1 ssh2: ED25519 SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+              'Failed none for invalid user admin from 203.0.113.24 port 1 ssh2',
+              'Server listening on :: port 22.') {
+    is_deeply m1('sshd-auth', $line), [], "not counted: $line";
+}
+{
+    my $fast = BadIPs::Engine::Counter->new(rule => $R{'sshd-auth'});
+    my $det;
+    $det ||= $fast->observe('203.0.113.40', 90_000 + 30 * $_, 1, "try $_") for 0 .. 3;
+    ok $det, 'four failures in ten minutes are a detection';
+    is $det->{expires} - $det->{last}, 21600, 'and ban for six hours';
+    my $slow = BadIPs::Engine::Counter->new(rule => $R{'sshd-auth-slow'});
+    my $sdet;
+    for my $i (0 .. 11) { $sdet ||= $slow->observe('203.0.113.41', 90_000 + 3600 * $i, 1, "slow $i") }
+    ok $sdet, 'one failure an hour is caught by the slow rule';
+    is $sdet->{expires} - $sdet->{last}, 86400, 'slow rule bans for a day';
+    my $fast2 = BadIPs::Engine::Counter->new(rule => $R{'sshd-auth'});
+    my $fdet;
+    for my $i (0 .. 11) { $fdet ||= $fast2->observe('203.0.113.41', 90_000 + 3600 * $i, 1, "slow $i") }
+    ok !$fdet, 'the same pace never trips the fast rule';
+}
+
 # --- postfix-auth-slow ------------------------------------------------------
 {
     my $slow = BadIPs::Engine::Counter->new(rule => $R{'postfix-auth-slow'});
@@ -112,6 +171,10 @@ sub errs { my %c = (%ok, @_); my ($r, $e) = BadIPs::Engine::Rules::compile_rule(
 like errs(match => '^(\S+) x')->[0], qr/\(\?<ip>/, 'a pattern without (?<ip>) is refused';
 like errs(match => '^(?<ip>[)')->[0], qr/does not compile/, 'a broken pattern is refused';
 like errs(journal => 'postfix')->[0], qr/not both/, 'source and journal together are refused';
+is_deeply errs(source => '', journal => 'ssh.service'), [], 'a journal rule compiles (4.3.0: the unit check used to interpolate @_ and die)';
+like errs(source => '', journal => 'ssh service')->[0], qr/not a valid unit name/, 'a unit name with a space is refused';
+is +(BadIPs::Engine::Rules::compile_rule('j', { %ok, source => '', journal => 'ssh.service' }))[0]{format}, 'journal',
+    'a journal rule defaults to the journal format';
 like errs(source => 'relative.log')->[0], qr/absolute/, 'a relative source path is refused';
 like errs(ban => 30)->[0], qr/at least 60/, 'a ban under 60 s is refused';
 like errs(count => 0)->[0], qr/count/, 'a zero count is refused';

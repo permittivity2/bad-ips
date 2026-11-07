@@ -22,7 +22,7 @@ use warnings;
 
 use Sys::Hostname ();
 
-our $VERSION = '4.2.0';
+our $VERSION = '4.3.0';
 
 my %MODE = (off => 0, report => 1);
 

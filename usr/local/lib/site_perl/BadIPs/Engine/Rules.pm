@@ -79,8 +79,11 @@ sub compile_rule {
     for my $f (@files) {
         push @err, "source '$f' must be an absolute path" unless $f =~ m{\A/};
     }
+    # \@: a bare @_ here is interpolated as the argument list, which turns the
+    # class into garbage ("Invalid [] range") -- no journal rule compiled
+    # before 4.3.0.
     push @err, "journal '$journal' is not a valid unit name"
-        if length $journal && $journal !~ /\A[A-Za-z0-9@_.:-]+\z/;
+        if length $journal && $journal !~ /\A[A-Za-z0-9\@_.:-]+\z/;
     $r{files}   = \@files;
     $r{journal} = $journal;
 

@@ -1,3 +1,27 @@
+bad-ips (4.3.0) unstable; urgency=medium
+
+  * Failed SSH logins are a shipped rule. 60-rules.conf gains sshd-auth
+    (4 in 10 minutes -> 6 h ban) and sshd-auth-slow (10 in a day -> 1 day),
+    the first shipped rules read from the journal (journal = ssh.service):
+    a wrong password, an unknown user, a client that gives up while
+    authenticating, and a non-SSH banner, as OpenSSH 10 on Debian 13 writes
+    them. The address is taken from the END of the line, so nothing typed
+    into a username can plant one. A client that merely connects and leaves
+    before authenticating is NOT counted: that is how a port scanner, a
+    banner probe and an impatient SSH client all look, and it is what the
+    house's own phones do all day. Neither is a failed public key (an agent
+    with several keys fails a few on every connection). Role mode never ran
+    the old SSH detector ([Plugins:GeneralLogMonitor] is a legacy section),
+    so until now an internet-facing SSH host in role mode reported nothing.
+  * Bug: no journal rule could ever be used. The unit-name check in
+    compile_rule interpolated Perl's @_ into its character class, so any
+    rule with a journal source died at compile ("Invalid [] range").
+    Unnoticed since 4.0 because every shipped rule read a file.
+  * Man page: the shipped rules listed; what a journal rule gets to match.
+  * New tests in t/rules.t. For post-cutover #61 (bad-ips on jumper).
+
+ -- Gardner <gardner@homelab>  Sat, 07 Nov 2026 12:45:00 -0600
+
 bad-ips (4.2.0) unstable; urgency=medium
 
   * Where a ban comes from. The block role looks up the country and network

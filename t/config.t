@@ -46,7 +46,7 @@ ok $s->{never}->conflict('192.0.2.65'), 'house is never-blocked';
 ok $s->{never}->conflict('2001:db8:5400:2e7f::1'), 'offsite v6 is never-blocked';
 ok $s->{never}->conflict('10.50.2.144'), 'the floor is always there';
 is_deeply [ sort map { $_->{name} } @{ $s->{rules} } ],
-    [qw(dovecot-auth nginx-catchall-flood nginx-probe postfix-abuse postfix-auth postfix-auth-slow)],
+    [qw(dovecot-auth nginx-catchall-flood nginx-probe postfix-abuse postfix-auth postfix-auth-slow sshd-auth sshd-auth-slow)],
     'only the [rule:*] sections run -- none of the legacy detectors';
 like "@$notes", qr/legacy sections ignored in role mode: .*detector:nginx/, 'ignored legacy sections are listed';
 is scalar @{ $s->{feeds} }, 1, 'the shipped Spamhaus feed is loaded';

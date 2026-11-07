@@ -1,4 +1,4 @@
-.TH BAD_IPS 8 "November 2026" "Bad IPs 4.2.0" "System Administration"
+.TH BAD_IPS 8 "November 2026" "Bad IPs 4.3.0" "System Administration"
 .SH NAME
 bad_ips \- distributed IP blocking system with centralized database
 .SH SYNOPSIS
@@ -202,12 +202,14 @@ Each
 .BI [rule: name ]
 section is one rule; a later file's section with the same name replaces it whole, and
 .B active = 0
-switches it off. The shipped rules are in badips.d/60-rules.conf.
+switches it off. The shipped rules are in badips.d/60-rules.conf: nginx-probe, nginx-catchall-flood, postfix-auth, postfix-auth-slow, postfix-abuse, dovecot-auth and, since 4.3.0, sshd-auth and sshd-auth-slow. The sshd rules read the ssh.service journal and count a wrong password, an unknown user, a client that gives up while authenticating and a non-SSH banner: 4 in 10 minutes bans for 6 hours, 10 in a day for a day. A client that merely connects and leaves before authenticating is not counted (that is how a port scanner, a banner probe and an impatient SSH client all look), nor is a failed public key (an agent with several keys fails a few on every connection).
 .TP
 .B source
 One or more log files (absolute paths, same format), or
 .B journal
-= one systemd unit (not both). A rule only runs where its source exists.
+= one systemd unit (not both). A rule only runs where its source exists. A journal rule reads the unit with journalctl, resuming from a saved cursor; each entry carries its own time, so
+.B format
+defaults to journal there, and the pattern is matched against the bare message, without the timestamp, host and identifier a log file would carry.
 .TP
 .B match
 A Perl regular expression that MUST capture the client address as
