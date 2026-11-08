@@ -30,6 +30,17 @@ sub run_tc {
     return ($rc, $out);
 }
 
+# a command (unban, ban, list, why): its exit code and what it printed
+sub run_cmd {
+    my ($argv, %a) = @_;
+    open my $fh, '>', \my $out or die;
+    my $old = select $fh;
+    my $rc = BadIPs::Engine::CLI::main(%a, argv => $argv);
+    select $old;
+    close $fh;
+    return ($rc, $out);
+}
+
 my $ROLE  = "[global]\nrole = report\n";
 my $FLEET = "[global]\nnever_block_cidrs = 203.0.113.0/29\n";
 my $DB96  = "[global]\ndb_host = 192.0.2.1\ndb_port = 6432\ndb_name = homelab\ndb_user = badips_runtime\ndb_password = x\ndb_schema = badips\n";
@@ -59,13 +70,33 @@ unlike $out, qr/oldsecret/, 'no password printed';
 
 # --- reachable: against a real, private PostgreSQL ------------------------------
 SKIP: {
-    my $pg = TestPg->start or skip 'no PostgreSQL server binaries', 3;
+    my $pg = TestPg->start or skip 'no PostgreSQL server binaries', 12;
     %t = conf_tree('d/94-role.conf' => $ROLE, 'd/95-fleet.conf' => $FLEET, 'd/96-fleet-db.conf' => "[global]\n" . $pg->db_conf);
     ($rc, $out) = run_tc(%t);
     is $rc, 0, 'a reachable database: exit 0';
     like $out, qr{^\s+reachable; 0 active bans$}m, 'reachable, with the active count';
     like $out, qr{^database:\s+\S+:\d+/postgres as badips_runtime, schema badips  \(from \S+/d/96-fleet-db\.conf\)$}m,
         'the database line, from the real file';
+
+    # --- list: the last line counts ALL active bans, not the rows shown ----------
+    ($rc, $out) = run_cmd(['list'], %t);
+    is $rc, 0, 'list with nothing banned: exit 0';
+    like $out, qr{^0 active bans$}m, '...says 0 active bans';
+    # (203.0.113.0/29 is this test's never-block list, so these start at .17)
+    ($rc, $out) = run_cmd([ 'ban', '203.0.113.17', '--for', '10m', '--reason', 'test' ], %t);
+    is $rc, 0, 'ban';
+    run_cmd([ 'ban', '203.0.113.18', '--for', '10m' ], %t);
+    run_cmd([ 'ban', '203.0.113.19', '--for', '10m' ], %t);
+    ($rc, $out) = run_cmd(['list'], %t);
+    like $out, qr{^3 active bans$}m, 'three bans, no limit: "3 active bans"';
+    ($rc, $out) = run_cmd([ 'list', '--limit', '2' ], %t);
+    is $rc, 0, 'list --limit 2: exit 0';
+    is scalar(() = $out =~ /^203\.0\.113\.\d+ /mg), 2, '...shows two rows';
+    like $out, qr{^showing 2 of 3 active bans$}m, '...and says "showing 2 of 3 active bans", not "2 active bans"';
+    ($rc, $out) = run_cmd([ 'list', '--limit', '5' ], %t);
+    like $out, qr{^3 active bans$}m, 'a limit above the count: the plain count';
+    ($rc, $out) = run_cmd([ 'list', '--limit', '1' ], %t);
+    like $out, qr{^showing 1 of 3 active bans$}m, 'one row: "showing 1 of 3", not "1 active ban"';
 }
 
 done_testing;

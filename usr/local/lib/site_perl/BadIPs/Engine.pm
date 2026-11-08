@@ -13,9 +13,10 @@ package BadIPs::Engine;
 #
 # One thread, one loop. Each pass reads new log lines (bounded), then, when
 # due: pushes queued detections, refreshes exemptions, reconciles the
-# firewall, refreshes feeds, saves log positions and logs a heartbeat. A
-# database outage only delays sharing: detections queue (bounded) and the
-# block role keeps enforcing its last good list plus its own detections.
+# firewall, refreshes feeds, saves log positions and the queue, and logs a
+# heartbeat. A database outage only delays sharing: detections queue
+# (bounded, and saved to state_dir so a restart loses none) and the block
+# role keeps enforcing its last good list plus its own detections.
 #
 # (3.x ran one thread per job; role mode does not need any of them, and
 # leaves the legacy daemon untouched for hosts without a role.)
@@ -149,10 +150,11 @@ sub _same_rule {
 sub _max_window { my $m = 0; for (@{ $_[0] }) { $m = $_->{window} if $_->{window} > $m } return $m || 600 }
 
 # --------------------------------------------------------------------------
-# positions
+# positions, and the queue of detections not yet shared
 # --------------------------------------------------------------------------
 
 sub _positions_file { "$_[0]{s}{state_dir}/engine-positions.json" }
+sub _queue_file     { "$_[0]{s}{state_dir}/engine-queue.json" }
 
 sub _load_positions {
     my ($self) = @_;
@@ -176,6 +178,64 @@ sub save_positions {
         print {$fh} $text;
         close $fh;
         rename "$f.tmp", $f and $self->{saved_positions} = $text;
+    }
+}
+
+=head2 load_queue($now)
+
+The detections that were still waiting for the shared list when the daemon
+last saved (every few seconds, and on stop), minus those whose ban has run
+out. Log positions move on as lines are read, so without this a restart
+during a database outage lost every detection the outage had held back.
+Called once, at start: a reload keeps the queue it has in memory.
+
+=cut
+
+sub load_queue {
+    my ($self, $now) = @_;
+    return unless $self->{store};
+    my $f = $self->_queue_file;
+    open(my $fh, '<', $f) or return;
+    local $/;
+    my $saved = eval { JSON->new->utf8->decode(scalar <$fh>) };
+    return unless ref $saved eq 'ARRAY' && @$saved;
+    my @keep = grep { ref $_ eq 'HASH' && defined $_->{ip} && ($_->{expires} // 0) > $now } @$saved;
+    my $over = @keep - $self->{s}{queue_max};
+    splice(@keep, 0, $over) if $over > 0;    # beyond the bound the oldest go, as when they were queued
+    push @{ $self->{queue} }, @keep;
+    if ($self->{s}{role} eq 'block') {
+        # our own finds, not yet on the list: enforce them now, as before the restart
+        for my $d (@keep) {
+            my $o = $self->{own}{ $d->{ip} };
+            $self->{own}{ $d->{ip} } = { expires => $d->{expires}, pushed => 0 } if !$o || $o->{expires} < $d->{expires};
+        }
+        $self->{next}{reconcile} = 0 if @keep;
+    }
+    $self->logger->info(sprintf 'restored %d detection%s not yet shared (%d expired meanwhile, dropped) from %s',
+        scalar @keep, (@keep == 1 ? '' : 's'), @$saved - @keep, $f);
+}
+
+=head2 save_queue
+
+Writes the queue to state_dir when it has changed since the last save; an
+empty queue removes the file.
+
+=cut
+
+sub save_queue {
+    my ($self) = @_;
+    my $f = $self->_queue_file;
+    my $text = @{ $self->{queue} } ? JSON->new->canonical->utf8->encode($self->{queue}) : '';
+    return if defined $self->{saved_queue} && $self->{saved_queue} eq $text;
+    if ($text eq '') {
+        unlink $f;
+        $self->{saved_queue} = '';
+        return;
+    }
+    if (open(my $fh, '>', "$f.tmp")) {
+        print {$fh} $text;
+        close $fh;
+        rename "$f.tmp", $f and $self->{saved_queue} = $text;
     }
 }
 
@@ -416,7 +476,7 @@ sub step {
         eval { BadIPs::Engine::Metrics::publish($self, $now); 1 } or $self->logger->warn("metrics: $@");
         $n->{metrics} = $now + $s->{metrics_interval};
     }
-    if ($now >= ($n->{save} // 0))      { $self->save_positions;           $n->{save}   = $now + 10 }
+    if ($now >= ($n->{save} // 0))      { $self->save_positions; $self->save_queue; $n->{save} = $now + 10 }
     if ($now >= ($n->{expire} // 0))    { $_->expire($now) for values %{ $self->{counters} }; $n->{expire} = $now + 60 }
     if ($now >= ($n->{heartbeat} // $now + $s->{heartbeat})) { $self->heartbeat; $n->{heartbeat} = $now + $s->{heartbeat} }
     $n->{heartbeat} //= $now + $s->{heartbeat};
@@ -431,6 +491,7 @@ sub start {
     }
     $self->logger->info("note: $_") for @$notes;
     $self->_setup($s);
+    $self->load_queue(time);
     return 1;
 }
 
@@ -478,6 +539,7 @@ sub run {
     }
     $self->push_queue(time) if @{ $self->{queue} };
     $self->save_positions;
+    $self->save_queue;    # whatever the database did not take is here for the next start
     $self->logger->info('bad-ips role mode stopped');
     return 0;
 }

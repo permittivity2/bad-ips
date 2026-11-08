@@ -92,7 +92,11 @@ sub main {
         printf "%-40s %-19s %-19s %s\n", 'ADDRESS', 'LAST SEEN', 'BANNED UNTIL', 'REPORTED BY / RULE';
         printf "%-40s %-19s %-19s %s / %s\n", $_->{ip}, _when($_->{last_seen}), _when($_->{expires}), $_->{servers}, $_->{rules}
             for @$rows;
-        printf "%d active ban%s\n", scalar @$rows, (@$rows == 1 ? '' : 's');
+        # every row carries the count of ALL active bans; a limited list says
+        # how many it left out instead of passing the rows shown off as the total
+        my $total = @$rows ? $rows->[0]{total} : 0;
+        if   ($total > @$rows) { printf "showing %d of %d active bans\n", scalar @$rows, $total }
+        else                   { printf "%d active ban%s\n", $total, ($total == 1 ? '' : 's') }
         return 0;
     }
     if ($cmd eq 'why') {

@@ -1,4 +1,4 @@
-.TH BAD_IPS 8 "November 2026" "Bad IPs 4.3.1" "System Administration"
+.TH BAD_IPS 8 "November 2026" "Bad IPs 4.3.2" "System Administration"
 .SH NAME
 bad_ips \- distributed IP blocking system with centralized database
 .SH SYNOPSIS
@@ -63,6 +63,9 @@ A manual ban for
 .TP
 .B list
 Active bans, newest first, with the hosts and rules that reported them.
+.B \-\-limit
+.I N
+(default 1000) shows the N most recent; the last line then reads "showing N of M active bans", M being every active ban.
 .TP
 .BI "why " address
 Every report of the address (host, rule, hit count, the matching log lines, when the ban ends) and its exemption history. Also says when the address is on this host's never-block list.
@@ -95,7 +98,7 @@ Database connection configuration including host, port, credentials, and SSL set
 Detector configuration files for various services (SSH, mail, web, DNS, etc.). Each detector defines systemd units to monitor and attack patterns to match.
 .TP
 .I /var/lib/bad_ips/
-Directory for local state files and failover logs.
+Directory for local state files and failover logs. In role mode: engine-positions.json (where each log was read to) and engine-queue.json (detections the shared ban list has not received yet).
 .TP
 .I /var/log/bad_ips/bad_ips.log
 Main log file for Bad IPs daemon. Rotated daily by
@@ -193,7 +196,9 @@ Where the daemon writes badips.prom, a file of numbers for Prometheus' node_expo
 Block role: where the country / network-owner lookup files live (built by bad_ips_geo_update from DB-IP Lite data, https://db-ip.com, CC BY 4.0, refreshed monthly by bad_ips-geo.timer). Each newly banned address gets its country and owner recorded in the shared database; without the files, bans carry none.
 .TP
 .BR backread_bytes " (2 MB), " max_read_bytes " (8 MB), " queue_max " (5000)"
-How far back a log file is read on a fresh start (a saved position is used when the file is the same one), the most read per pass, and the most detections held while the database is unreachable (the oldest are dropped beyond it).
+How far back a log file is read on a fresh start (a saved position is used when the file is the same one), the most read per pass, and the most detections held while the database is unreachable (the oldest are dropped beyond it). The held detections are saved to
+.B state_dir
+(engine-queue.json) every few seconds and on stop, and read back at start, so a restart during an outage loses none; entries whose ban has run out by then are dropped.
 .TP
 .BR state_dir " (/var/lib/bad_ips), " cache_dir " (/var/cache/badips), " host_name
 Where log positions and feed caches live, and the name this host reports as (default: the short hostname).
@@ -258,8 +263,8 @@ and
 accept never-block, accept DNS, then drop bans and feed ranges. Every reconcile it compares the table with what it should be: when the table is missing or its structure differs it is rebuilt in one atomic transaction; otherwise only the differences are applied. The static part (never-block list, interfaces, rules) is also written to /etc/nftables.d/99-badips.nft, so a plain nftables reload restores never-block together with the table; bans and feed ranges come back on the next reconcile. A starting node loads every active ban with its real end time. Element timeouts are capped at 30 days and re-extended as they run down.
 .SS Shared ban list
 Detections are reported in one transaction per push; a re-ban keeps the later end time, so a short ban never cuts a longer one. A database outage only delays sharing: detections queue (bounded by
-.BR queue_max )
-and the block role keeps enforcing the last list it read plus its own detections. Unban adds an exemption; once the shared list has a ban, the list decides, so an unban takes effect even for the block host's own detection.
+.BR queue_max ,
+and saved to disk, so they survive a restart) and the block role keeps enforcing the last list it read plus its own detections, restored ones included. Unban adds an exemption; once the shared list has a ban, the list decides, so an unban takes effect even for the block host's own detection.
 .SH CONFIGURATION
 .SS Main Configuration
 Edit

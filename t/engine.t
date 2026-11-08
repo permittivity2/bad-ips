@@ -137,6 +137,37 @@ ok $k->has('badipv4', '198.51.100.92'), 'database down: the edge still blocks it
 ok $k->has('badipv4', '203.0.113.90'), 'database down: the edge keeps enforcing the last list it had';
 is scalar @{ $mail->{queue} }, 1, 'database down: the mail server queues its detection';
 
+# --- a restart while the database is down keeps what was not shared yet ----------------------------
+# Positions were saved past the lines that produced these detections, so a
+# restart cannot find them again in the logs: only the saved queue has them.
+$mail->save_queue;    # what the save slot did at the last step, and what a stop does
+ok -s "$mdir/engine-queue.json", 'the unshared detection is on disk';
+my $mail2 = BadIPs::Engine->new(conf_main => "$mdir/none", conf_dir => "$mdir/d", host => 'prod-homelab39', log => Quiet->new);
+ok $mail2->start, 'restarted report host starts';
+is scalar @{ $mail2->{queue} }, 1, 'and takes over the detection the database never received';
+is $mail2->{queue}[0]{ip}, '203.0.113.93', '...the right one, evidence and all';
+is scalar @{ $mail2->{queue}[0]{lines} }, 5, '...with its log lines';
+my $kr = FakeKernel->new(clock => $now + 170);
+my $edge_r = BadIPs::Engine->new(conf_main => "$edir/none", conf_dir => "$edir/d", host => 'prod-homelab00', log => Quiet->new,
+                                 runner => $kr->runner);
+$edge_r->start;
+$edge_r->{store}{db}{port} = 1;    # still down
+$edge_r->{store}{dbh} = undef;
+$edge_r->step($now + 170);
+ok $kr->has('badipv4', '198.51.100.92'), 'a restarted edge, database still down, blocks its own unshared detection at once';
+is scalar @{ $edge_r->{queue} }, 1, '...and still has it queued for the list';
+# an entry whose ban has run out is not worth sharing any more
+{
+    open my $fh, '<', "$mdir/engine-queue.json" or die; local $/; my $json = <$fh>; close $fh;
+    my $q = JSON::decode_json($json);
+    push @$q, { %{ $q->[0] }, ip => '203.0.113.99', expires => $now - 1 };
+    open $fh, '>', "$mdir/engine-queue.json" or die; print {$fh} JSON::encode_json($q); close $fh;
+}
+my $mail3 = BadIPs::Engine->new(conf_main => "$mdir/none", conf_dir => "$mdir/d", host => 'prod-homelab39', log => my $m3log = Quiet->new);
+$mail3->start;
+is scalar @{ $mail3->{queue} }, 1, 'an expired entry in the saved queue is dropped on the way in';
+ok $m3log->saw(qr/restored 1 detection not yet shared \(1 expired meanwhile, dropped\)/), '...and said so';
+
 # --- and comes back --------------------------------------------------------------------------------
 $edge->{store}{db}{port} = $real_port;
 $mail->{store}{db}{port} = $real_port;

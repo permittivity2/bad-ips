@@ -1,3 +1,19 @@
+bad-ips (4.3.2) unstable; urgency=medium
+
+  * bad_ips list --limit N ended with "N active bans" for the rows it
+    showed. The query now carries the count of every active ban, and a
+    limited list ends with "showing N of M active bans".
+  * Detections queued while the shared ban list was unreachable were lost
+    if the daemon restarted: the log positions had moved past the lines
+    they came from, so nothing could find them again (how 29 of the edge's
+    finds under 4.0.0 never reached the list). The queue is now saved to
+    state_dir (engine-queue.json) every few seconds and on stop, and read
+    back at start; entries whose ban has run out by then are dropped, and
+    a block host puts its own restored finds back in the firewall at once.
+  * Tests for both; man page.
+
+ -- Gardner <gardner@homelab>  Sun, 08 Nov 2026 09:00:00 -0600
+
 bad-ips (4.3.1) unstable; urgency=medium
 
   * The sshd rules count two more lines, so a keys-only server still bans.

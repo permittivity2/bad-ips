@@ -284,7 +284,9 @@ sub ban {
 
 =head2 list($now, limit => N)
 
-Active bans, newest first: [ { ip, expires, servers, rules, last_seen } ].
+Active bans, newest first: [ { ip, expires, servers, rules, last_seen, total } ].
+Every row carries C<total>, the number of active bans altogether, so a
+limited list can say how many it left out.
 
 =cut
 
@@ -292,10 +294,13 @@ sub list {
     my ($self, $now, %a) = @_;
     return $self->_do($now, sub {
         my ($dbh) = @_;
+        # count(*) OVER () runs after GROUP BY and before LIMIT: the number of
+        # banned addresses, not of rows shown.
         return $dbh->selectall_arrayref(<<'SQL', { Slice => {} }, $now, $a{limit} // 1000);
 SELECT host(ip) AS ip, max(expires_at) AS expires, max(last_seen_at) AS last_seen,
        string_agg(DISTINCT originating_server, ',') AS servers,
-       string_agg(DISTINCT detector_name, ',') AS rules
+       string_agg(DISTINCT detector_name, ',') AS rules,
+       count(*) OVER () AS total
   FROM jailed_ips WHERE expires_at > ?
  GROUP BY ip ORDER BY max(last_seen_at) DESC LIMIT ?
 SQL

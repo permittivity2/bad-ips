@@ -73,6 +73,10 @@ is $st->load_active($now + 51)->{'203.0.113.80'}, $after + 3600, 'manual ban lif
 # list and why
 my $l = $st->list($now + 51);
 ok( (grep { $_->{ip} eq '203.0.113.80' && $_->{servers} =~ /prod-homelab39/ } @$l), 'list shows the ban and its hosts' );
+is $l->[0]{total}, scalar @$l, 'every row carries the count of all active bans';
+my $lim = $st->list($now + 51, limit => 1);
+is scalar @$lim, 1, 'list with a limit returns that many rows';
+is $lim->[0]{total}, scalar @$l, '...and still the count of ALL active bans, not of the rows shown';
 my $w = $st->why('203.0.113.80', $now + 51);
 ok @{ $w->{bans} } >= 2, 'why shows each host\'s row';
 ok( (grep { ($_->{evidence} // '') =~ /evidence 1/ } @{ $w->{bans} }) || (grep { $_->{rule} eq 'manual' } @{ $w->{bans} }), 'why shows evidence' );

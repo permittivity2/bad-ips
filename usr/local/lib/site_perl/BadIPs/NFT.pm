@@ -6,7 +6,7 @@ use JSON;
 use IPC::Open3 qw(open3);
 use Log::Log4perl qw(get_logger);
 
-our $VERSION = '4.3.1';
+our $VERSION = '4.3.2';
 
 my $log = get_logger("BadIPs::NFT");
 

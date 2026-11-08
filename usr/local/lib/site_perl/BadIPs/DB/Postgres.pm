@@ -6,7 +6,7 @@ use DBI;
 use Log::Log4perl qw(get_logger);
 use Sys::Hostname;
 
-our $VERSION = '4.3.1';
+our $VERSION = '4.3.2';
 
 my $log = get_logger("BadIPs::DB::Postgres");
 

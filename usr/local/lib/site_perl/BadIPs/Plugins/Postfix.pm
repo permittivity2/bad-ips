@@ -6,7 +6,7 @@ use File::Slurp qw(read_file);
 use Log::Log4perl qw(get_logger);
 use Regexp::Common qw(net);  # Exports %RE{net}
 use JSON qw(decode_json);
-our $VERSION = '4.3.1';
+our $VERSION = '4.3.2';
 
 my $log = get_logger();
 
